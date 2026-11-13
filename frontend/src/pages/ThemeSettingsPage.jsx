@@ -20,8 +20,8 @@ import {
 } from '../components/common/icons'
 import ListPageHeader from '../components/common/ListPageHeader'
 import ArrowNavTabs from '../components/common/ArrowNavTabs'
-import defaultLogo from '../assets/Logo/Logo-bg-remove.webp'
-import defaultFavicon from '../assets/Logo/Favicon.jpeg'
+import defaultLogo from '../assets/Logo/Demo-logo.svg'
+import defaultFavicon from '../assets/Logo/favicon.ico'
 import { useTheme } from '../context/ThemeContext'
 import { showToast, showConfirm, showAlert } from '../utils/alerts'
 

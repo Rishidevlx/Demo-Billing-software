@@ -15,8 +15,8 @@ import {
   PanelLeftClose,
   PanelLeftOpen
 } from '../common/icons'
-import logoImg from '../../assets/Logo/Logo-bg-remove.webp'
-import faviconImg from '../../assets/Logo/Favicon.jpeg'
+import logoImg from '../../assets/Logo/Demo-logo.svg'
+import faviconImg from '../../assets/Logo/favicon.ico'
 import { useTheme } from '../../context/ThemeContext'
 
 import { MENU_CHILD_TABS_MAP } from '../../utils/access'

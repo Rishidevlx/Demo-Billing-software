@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react'
 import { API_ENDPOINTS } from '../config/api'
-import defaultLogo from '../assets/Logo/Logo-bg-remove.webp'
-import defaultFavicon from '../assets/Logo/Favicon.jpeg'
+import defaultLogo from '../assets/Logo/Demo-logo.svg'
+import defaultFavicon from '../assets/Logo/favicon.ico'
 
 const DEFAULT_THEME = {
   primaryColor: '#FF8533',

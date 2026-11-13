@@ -1,7 +1,7 @@
 import React from 'react'
 import { pdf } from '@react-pdf/renderer'
 import MasterBillPdf from '../components/pdf-templates/MasterBillPdf'
-import defaultLogoPng from '../assets/Logo/Logo-bg-remove.png'
+import defaultLogoPng from '../assets/Logo/Demo-logo.svg'
 
 /**
  * Convert any image URL (local, remote, webp, svg) into a safe PNG Base64 Data URL.

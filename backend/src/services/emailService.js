@@ -94,7 +94,7 @@ function getBase64Image(relativePath) {
     const fullPath = path.resolve(__dirname, relativePath)
     if (fs.existsSync(fullPath)) {
       const ext = path.extname(fullPath).toLowerCase()
-      const mime = ext === '.png' ? 'image/png' : ext === '.jpg' || ext === '.jpeg' ? 'image/jpeg' : 'image/png'
+      const mime = ext === '.svg' ? 'image/svg+xml' : ext === '.ico' ? 'image/x-icon' : ext === '.png' ? 'image/png' : ext === '.jpg' || ext === '.jpeg' ? 'image/jpeg' : 'image/png'
       const data = fs.readFileSync(fullPath).toString('base64')
       return `data:${mime};base64,${data}`
     }
@@ -385,8 +385,8 @@ export function generateInvoiceHtml(bill, settings = {}) {
   }
 
   // Assets
-  const logoDataUri = getBase64Image('../../../frontend/src/assets/Logo/Logo-bg-remove.png')
-  const watermarkDataUri = getBase64Image('../../../frontend/src/assets/Logo/Favicon.jpeg')
+  const logoDataUri = getBase64Image('../../../frontend/src/assets/Logo/Demo-logo.svg')
+  const watermarkDataUri = getBase64Image('../../../frontend/src/assets/Logo/favicon.ico')
 
   const paginatedPages = paginateInvoiceItems(items)
 
@@ -1477,8 +1477,8 @@ export function generateReceiptHtml(bill, settings = {}) {
   }
 
   // Assets
-  const logoDataUri = getBase64Image('../../../frontend/src/assets/Logo/Logo-bg-remove.png')
-  const watermarkDataUri = getBase64Image('../../../frontend/src/assets/Logo/Favicon.jpeg')
+  const logoDataUri = getBase64Image('../../../frontend/src/assets/Logo/Demo-logo.svg')
+  const watermarkDataUri = getBase64Image('../../../frontend/src/assets/Logo/favicon.ico')
 
   const paginatedPages = paginateInvoiceItems(items)
 
@@ -2457,8 +2457,8 @@ export function generateQuotationHtml(quotation, settings = {}) {
   }
 
   // Assets
-  const logoDataUri = getBase64Image('../../../frontend/src/assets/Logo/Logo-bg-remove.png')
-  const watermarkDataUri = getBase64Image('../../../frontend/src/assets/Logo/Favicon.jpeg')
+  const logoDataUri = getBase64Image('../../../frontend/src/assets/Logo/Demo-logo.svg')
+  const watermarkDataUri = getBase64Image('../../../frontend/src/assets/Logo/favicon.ico')
 
   const paginatedPages = paginateInvoiceItems(items)
 

@@ -14,7 +14,7 @@ import {
   User
 } from '../components/common/icons'
 import Swal from 'sweetalert2'
-import defaultLogo from '../assets/Logo/Logo-bg-remove.webp'
+import defaultLogo from '../assets/Logo/Demo-logo.svg'
 import resetIllustration from '../assets/reset_illustration.png'
 import { API_ENDPOINTS } from '../config/api'
 import { useTheme } from '../context/ThemeContext'

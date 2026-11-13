@@ -1,6 +1,6 @@
 import React from 'react'
 import { useTheme } from '../../../context/ThemeContext'
-import defaultLogo from '../../../assets/Logo/Logo-bg-remove.webp'
+import defaultLogo from '../../../assets/Logo/Demo-logo.svg'
 
 export default function TemplateHeader({
   logoUrl,

@@ -17,7 +17,7 @@ import {
 import Input from '../components/ui/Input'
 import Button from '../components/ui/Button'
 import Checkbox from '../components/ui/Checkbox'
-import defaultLogo from '../assets/Logo/Logo-bg-remove.webp'
+import defaultLogo from '../assets/Logo/Demo-logo.svg'
 import growthAnimation from '../assets/lottiefiles/growth-software.json'
 import { API_ENDPOINTS } from '../config/api'
 import { useTheme } from '../context/ThemeContext'

@@ -1,6 +1,6 @@
 import React from 'react'
 import { useTheme } from '../../../context/ThemeContext'
-import defaultFavicon from '../../../assets/Logo/Favicon.jpeg'
+import defaultFavicon from '../../../assets/Logo/favicon.ico'
 
 export default function TemplatePageShell({
   pageIndex = 1,
