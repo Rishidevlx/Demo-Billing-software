@@ -6,14 +6,11 @@ import {
   Save,
   CheckCircle2,
   AlertCircle,
-  Eye,
-  EyeOff,
   Key,
   Server,
   AtSign,
   User,
   Info,
-  Edit2,
   X,
   Cloud,
   Folder,
@@ -797,36 +794,25 @@ export default function ConfigurationsSettingsPage() {
                 </div>
               </div>
 
-              {canEditMail && (
-                !isEditingSmtp ? (
+              {canEditMail && isEditingSmtp && (
+                <div className="flex items-center gap-2">
                   <button
                     type="button"
-                    onClick={() => setIsEditingSmtp(true)}
-                    className="px-3 py-1.5 text-xs font-bold text-slate-900 dark:text-white hover:bg-blue-50 dark:hover:bg-slate-800 rounded-none border border-blue-200 dark:border-blue-900/50 transition-all flex items-center gap-1.5 cursor-pointer shadow-xs"
+                    onClick={handleCancelSmtp}
+                    className="px-2.5 py-1 text-xs font-medium text-gray-600 dark:text-slate-400 hover:bg-gray-100 dark:hover:bg-slate-800 rounded-none transition-colors cursor-pointer"
                   >
-                    <Edit2 size={13} />
-                    <span>Edit</span>
+                    Cancel
                   </button>
-                ) : (
-                  <div className="flex items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={handleCancelSmtp}
-                      className="px-2.5 py-1 text-xs font-medium text-gray-600 dark:text-slate-400 hover:bg-gray-100 dark:hover:bg-slate-800 rounded-none transition-colors cursor-pointer"
-                    >
-                      Cancel
-                    </button>
-                    <button
-                      type="button"
-                      onClick={handleSaveSmtp}
-                      disabled={isSavingSmtp}
-                      className="px-3 py-1 text-xs font-bold text-white bg-[#FF8533] hover:bg-[#FF8533] rounded-none transition-colors flex items-center gap-1 shadow-xs cursor-pointer disabled:opacity-50"
-                    >
-                      <Save size={12} />
-                      <span>{isSavingSmtp ? 'Saving...' : 'Save'}</span>
-                    </button>
-                  </div>
-                )
+                  <button
+                    type="button"
+                    onClick={handleSaveSmtp}
+                    disabled={isSavingSmtp}
+                    className="px-3 py-1 text-xs font-bold text-white bg-[#FF8533] hover:bg-[#FF8533] rounded-none transition-colors flex items-center gap-1 shadow-xs cursor-pointer disabled:opacity-50"
+                  >
+                    <Save size={12} />
+                    <span>{isSavingSmtp ? 'Saving...' : 'Save'}</span>
+                  </button>
+                </div>
               )}
             </div>
 
@@ -866,24 +852,17 @@ export default function ConfigurationsSettingsPage() {
                 </div>
                 <div className="relative">
                   <input
-                    type={showPassword ? 'text' : 'password'}
+                    type="password"
                     disabled={!isEditingSmtp}
                     value={mailFormData.smtp_pass}
                     onChange={(e) => handleMailChange('smtp_pass', e.target.value)}
-                    placeholder="Enter 16-digit app password"
-                    className={`w-full pl-3.5 pr-10 py-2.5 text-xs font-medium rounded-none font-mono transition-all ${
+                    placeholder="••••••••••••••••"
+                    className={`w-full px-3.5 py-2.5 text-xs font-medium rounded-none font-mono transition-all ${
                       isEditingSmtp
                         ? 'text-[#292424] dark:text-white bg-white dark:bg-slate-950 border border-gray-300 dark:border-slate-700 focus:outline-none focus:border-[#FF8533] dark:focus:border-blue-500'
                         : 'text-gray-700 dark:text-slate-300 bg-gray-50 dark:bg-slate-950/60 border border-gray-200 dark:border-slate-800 cursor-not-allowed'
                     }`}
                   />
-                  <button
-                    type="button"
-                    onClick={() => setShowPassword(prev => !prev)}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 dark:hover:text-slate-200 transition-colors cursor-pointer"
-                  >
-                    {showPassword ? <EyeOff size={14} /> : <Eye size={14} />}
-                  </button>
                 </div>
               </div>
 
@@ -1072,11 +1051,11 @@ export default function ConfigurationsSettingsPage() {
                   API Key <span className="text-red-500">*</span>
                 </label>
                 <input
-                  type="text"
+                  type="password"
                   disabled={!isEditingCloudinary}
                   value={cloudinaryFormData.api_key}
                   onChange={(e) => handleCloudinaryChange('api_key', e.target.value)}
-                  placeholder="Enter API Key"
+                  placeholder="••••••••••••••••"
                   className={`w-full px-3.5 py-2.5 text-xs font-medium rounded-none font-mono transition-all ${
                     isEditingCloudinary
                       ? 'text-[#292424] dark:text-white bg-white dark:bg-slate-950 border border-gray-300 dark:border-slate-700 focus:outline-none focus:border-sky-500'
@@ -1092,24 +1071,17 @@ export default function ConfigurationsSettingsPage() {
                 </label>
                 <div className="relative">
                   <input
-                    type={showCloudinarySecret ? 'text' : 'password'}
+                    type="password"
                     disabled={!isEditingCloudinary}
                     value={cloudinaryFormData.api_secret}
                     onChange={(e) => handleCloudinaryChange('api_secret', e.target.value)}
-                    placeholder="Enter API Secret"
-                    className={`w-full pl-3.5 pr-10 py-2.5 text-xs font-medium rounded-none font-mono transition-all ${
+                    placeholder="••••••••••••••••"
+                    className={`w-full px-3.5 py-2.5 text-xs font-medium rounded-none font-mono transition-all ${
                       isEditingCloudinary
                         ? 'text-[#292424] dark:text-white bg-white dark:bg-slate-950 border border-gray-300 dark:border-slate-700 focus:outline-none focus:border-sky-500'
                         : 'text-gray-700 dark:text-slate-300 bg-gray-50 dark:bg-slate-950/60 border border-gray-200 dark:border-slate-800 cursor-not-allowed'
                     }`}
                   />
-                  <button
-                    type="button"
-                    onClick={() => setShowCloudinarySecret(prev => !prev)}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 dark:hover:text-slate-200 transition-colors cursor-pointer"
-                  >
-                    {showCloudinarySecret ? <EyeOff size={14} /> : <Eye size={14} />}
-                  </button>
                 </div>
               </div>
 
@@ -1152,36 +1124,25 @@ export default function ConfigurationsSettingsPage() {
               </div>
 
               <div className="flex items-center gap-2.5">
-                {canEditCloudinary && (
-                  !isEditingCloudinary ? (
+                {canEditCloudinary && isEditingCloudinary && (
+                  <>
                     <button
                       type="button"
-                      onClick={() => setIsEditingCloudinary(true)}
-                      className="px-5 py-2 text-xs font-bold text-white bg-sky-600 hover:bg-sky-700 rounded-none transition-all flex items-center gap-1.5 cursor-pointer shadow-xs"
+                      onClick={handleCancelCloudinary}
+                      className="px-4 py-2 text-xs font-medium text-gray-600 dark:text-slate-400 hover:bg-gray-100 dark:hover:bg-slate-800 rounded-none transition-colors cursor-pointer border border-gray-300 dark:border-slate-700"
                     >
-                      <Edit2 size={13} />
-                      <span>Edit Credentials</span>
+                      Cancel
                     </button>
-                  ) : (
-                    <>
-                      <button
-                        type="button"
-                        onClick={handleCancelCloudinary}
-                        className="px-4 py-2 text-xs font-medium text-gray-600 dark:text-slate-400 hover:bg-gray-100 dark:hover:bg-slate-800 rounded-none transition-colors cursor-pointer border border-gray-300 dark:border-slate-700"
-                      >
-                        Cancel
-                      </button>
-                      <button
-                        type="button"
-                        onClick={handleSaveCloudinary}
-                        disabled={isSavingCloudinary}
-                        className="px-5 py-2 text-xs font-bold text-white bg-sky-600 hover:bg-sky-700 rounded-none transition-colors flex items-center gap-1.5 shadow-xs cursor-pointer disabled:opacity-50"
-                      >
-                        <Save size={13} />
-                        <span>{isSavingCloudinary ? 'Saving...' : 'Save Configuration'}</span>
-                      </button>
-                    </>
-                  )
+                    <button
+                      type="button"
+                      onClick={handleSaveCloudinary}
+                      disabled={isSavingCloudinary}
+                      className="px-5 py-2 text-xs font-bold text-white bg-sky-600 hover:bg-sky-700 rounded-none transition-colors flex items-center gap-1.5 shadow-xs cursor-pointer disabled:opacity-50"
+                    >
+                      <Save size={13} />
+                      <span>{isSavingCloudinary ? 'Saving...' : 'Save Configuration'}</span>
+                    </button>
+                  </>
                 )}
               </div>
             </div>
@@ -1331,27 +1292,17 @@ export default function ConfigurationsSettingsPage() {
 
                 <div className="relative">
                   <input
-                    type={isEditingAi ? (showAiKey ? 'text' : 'password') : 'text'}
+                    type="password"
                     disabled={!isEditingAi}
-                    value={isEditingAi ? aiFormData.groq_api_key : (aiFormData.masked_api_key || 'No API key configured')}
+                    value={isEditingAi ? aiFormData.groq_api_key : (aiFormData.api_key_configured ? '••••••••••••••••••••' : (aiFormData.masked_api_key || ''))}
                     onChange={(e) => handleAiChange('groq_api_key', e.target.value)}
-                    placeholder={isEditingAi ? 'Paste your Groq API key (gsk_...)' : 'gsk_••••••••••••••••'}
-                    className={`w-full px-3.5 py-2.5 pr-10 border text-xs font-medium rounded-none transition-colors ${
+                    placeholder="••••••••••••••••"
+                    className={`w-full px-3.5 py-2.5 border text-xs font-medium rounded-none font-mono transition-colors ${
                       isEditingAi
                         ? 'bg-white dark:bg-slate-900 border-[#FF8533] dark:border-blue-500 text-gray-900 dark:text-white'
-                        : 'bg-gray-50 dark:bg-slate-800/80 border-gray-200 dark:border-slate-700 text-gray-700 dark:text-slate-300 font-mono cursor-not-allowed'
+                        : 'bg-gray-50 dark:bg-slate-800/80 border-gray-200 dark:border-slate-700 text-gray-700 dark:text-slate-300 cursor-not-allowed'
                     }`}
                   />
-                  {isEditingAi && (
-                    <button
-                      type="button"
-                      onClick={() => setShowAiKey(!showAiKey)}
-                      className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 dark:hover:text-slate-200 cursor-pointer"
-                      title={showAiKey ? 'Hide key' : 'Show key'}
-                    >
-                      {showAiKey ? <EyeOff size={15} /> : <Eye size={15} />}
-                    </button>
-                  )}
                 </div>
               </div>
 
@@ -1380,36 +1331,25 @@ export default function ConfigurationsSettingsPage() {
               </div>
 
               <div className="flex items-center gap-2.5">
-                {canEditAi && (
-                  !isEditingAi ? (
+                {canEditAi && isEditingAi && (
+                  <>
                     <button
                       type="button"
-                      onClick={() => setIsEditingAi(true)}
-                      className="px-5 py-2 text-xs font-bold text-white bg-[#FF8533] hover:bg-[#FF8533] rounded-none transition-all flex items-center gap-1.5 cursor-pointer shadow-xs"
+                      onClick={handleCancelAi}
+                      className="px-4 py-2 text-xs font-medium text-gray-600 dark:text-slate-400 hover:bg-gray-100 dark:hover:bg-slate-800 rounded-none transition-colors cursor-pointer border border-gray-300 dark:border-slate-700"
                     >
-                      <Edit2 size={13} />
-                      <span>Edit Credentials</span>
+                      Cancel
                     </button>
-                  ) : (
-                    <>
-                      <button
-                        type="button"
-                        onClick={handleCancelAi}
-                        className="px-4 py-2 text-xs font-medium text-gray-600 dark:text-slate-400 hover:bg-gray-100 dark:hover:bg-slate-800 rounded-none transition-colors cursor-pointer border border-gray-300 dark:border-slate-700"
-                      >
-                        Cancel
-                      </button>
-                      <button
-                        type="button"
-                        onClick={handleSaveAi}
-                        disabled={isSavingAi}
-                        className="px-5 py-2 text-xs font-bold text-white bg-[#FF8533] hover:bg-[#FF8533] rounded-none transition-colors flex items-center gap-1.5 shadow-xs cursor-pointer disabled:opacity-50"
-                      >
-                        <Save size={13} />
-                        <span>{isSavingAi ? 'Saving...' : 'Save Configuration'}</span>
-                      </button>
-                    </>
-                  )
+                    <button
+                      type="button"
+                      onClick={handleSaveAi}
+                      disabled={isSavingAi}
+                      className="px-5 py-2 text-xs font-bold text-white bg-[#FF8533] hover:bg-[#FF8533] rounded-none transition-colors flex items-center gap-1.5 shadow-xs cursor-pointer disabled:opacity-50"
+                    >
+                      <Save size={13} />
+                      <span>{isSavingAi ? 'Saving...' : 'Save Configuration'}</span>
+                    </button>
+                  </>
                 )}
               </div>
             </div>
