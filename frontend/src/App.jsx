@@ -1,0 +1,265 @@
+import { useState, useEffect } from 'react'
+import { BrowserRouter, Routes, Route, Navigate, useNavigate } from 'react-router-dom'
+import LoginPage from './pages/LoginPage'
+import DashboardLayout from './components/layout/DashboardLayout'
+import DashboardPage from './pages/DashboardPage'
+import InwardBillPage from './pages/InwardBillPage'
+import InwardReportsPage from './pages/InwardReportsPage'
+import CreateQuotationPage from './pages/CreateQuotationPage'
+import AllQuotationsPage from './pages/AllQuotationsPage'
+import CreateBillPage from './pages/CreateBillPage'
+import AllBillsPage from './pages/AllBillsPage'
+import CreateServiceBillPage from './pages/CreateServiceBillPage'
+import AllServicesPage from './pages/AllServicesPage'
+import CategoriesPage from './pages/CategoriesPage'
+import AddMaterialPage from './pages/AddMaterialPage'
+import AllMaterialsPage from './pages/AllMaterialsPage'
+import InventoryPage from './pages/InventoryPage'
+import ReturnsAdjustmentsPage from './pages/ReturnsAdjustmentsPage'
+import ProfileSettingsPage from './pages/ProfileSettingsPage'
+import SystemSettingsPage from './pages/SystemSettingsPage'
+import ConfigurationsSettingsPage from './pages/ConfigurationsSettingsPage'
+import ThemeSettingsPage from './pages/ThemeSettingsPage'
+import UserManualPage from './pages/UserManualPage'
+import AddRolePage from './pages/AddRolePage'
+import RoleListPage from './pages/RoleListPage'
+import AddUserPage from './pages/AddUserPage'
+import UserListPage from './pages/UserListPage'
+import DepartmentListPage from './pages/DepartmentListPage'
+import ResetPasswordPage from './pages/ResetPasswordPage'
+import { ThemeProvider } from './context/ThemeContext'
+import { SettingsProvider } from './context/SettingsContext'
+import { API_ENDPOINTS } from './config/api'
+import { getDefaultLandingRoute } from './utils/access'
+
+export default function App() {
+  const [user, setUser] = useState(null)
+  const [isAuthenticated, setIsAuthenticated] = useState(false)
+  const [isCheckingAuth, setIsCheckingAuth] = useState(true)
+
+  // Verify stored token on app mount against live database API
+  useEffect(() => {
+    const checkAuth = async () => {
+      const storedToken = localStorage.getItem('simcha_token') || sessionStorage.getItem('simcha_token')
+      const storedUser = localStorage.getItem('simcha_user') || sessionStorage.getItem('simcha_user')
+
+      if (storedToken) {
+        try {
+          const res = await fetch(API_ENDPOINTS.ME, {
+            headers: {
+              'Authorization': `Bearer ${storedToken}`
+            }
+          })
+          const data = await res.json()
+
+          if (res.ok && data.success && data.user) {
+            setUser(data.user)
+            setIsAuthenticated(true)
+            if (localStorage.getItem('simcha_token')) {
+              localStorage.setItem('simcha_user', JSON.stringify(data.user))
+            }
+            if (sessionStorage.getItem('simcha_token')) {
+              sessionStorage.setItem('simcha_user', JSON.stringify(data.user))
+            }
+          } else {
+            // Token is invalid, expired or user deleted in DB
+            handleLogout()
+          }
+        } catch (e) {
+          console.warn('Backend reachability warning, checking offline cache:', e)
+          if (storedUser) {
+            try {
+              setUser(JSON.parse(storedUser))
+              setIsAuthenticated(true)
+            } catch {
+              handleLogout()
+            }
+          } else {
+            handleLogout()
+          }
+        }
+      } else {
+        handleLogout()
+      }
+      setIsCheckingAuth(false)
+    }
+
+    checkAuth()
+  }, [])
+
+  const handleLogin = (userData, token, rememberMe) => {
+    setUser(userData)
+    setIsAuthenticated(true)
+
+    if (rememberMe) {
+      localStorage.setItem('simcha_token', token)
+      localStorage.setItem('simcha_user', JSON.stringify(userData))
+    } else {
+      sessionStorage.setItem('simcha_token', token)
+      sessionStorage.setItem('simcha_user', JSON.stringify(userData))
+    }
+  }
+
+  const handleLogout = () => {
+    setUser(null)
+    setIsAuthenticated(false)
+    localStorage.removeItem('simcha_token')
+    localStorage.removeItem('simcha_user')
+    sessionStorage.removeItem('simcha_token')
+    sessionStorage.removeItem('simcha_user')
+  }
+
+  if (isCheckingAuth) {
+    return (
+      <div className="h-screen w-screen bg-[#F3F3F9] dark:bg-slate-950 flex flex-col p-6 space-y-6 font-['Poppins',sans-serif] animate-pulse">
+        <div className="h-16 bg-white dark:bg-slate-900 border-b border-gray-200 dark:border-slate-800 rounded-none w-full" />
+        <div className="flex-1 space-y-6 max-w-7xl mx-auto w-full">
+          <div className="h-10 bg-white dark:bg-slate-900 rounded-none w-1/3" />
+          <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
+            {Array.from({ length: 4 }).map((_, i) => (
+              <div key={i} className="h-28 bg-white dark:bg-slate-900 rounded-none" />
+            ))}
+          </div>
+          <div className="h-80 bg-white dark:bg-slate-900 rounded-none" />
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <ThemeProvider>
+      <SettingsProvider>
+        <BrowserRouter>
+      <Routes>
+        {/* Public Login Route */}
+        <Route
+          path="/login"
+          element={
+            isAuthenticated ? (
+              <Navigate to={getDefaultLandingRoute(user)} replace />
+            ) : (
+              <LoginPage onLogin={handleLogin} />
+            )
+          }
+        />
+
+        {/* Public 15-Minute Password Setup / Reset Route */}
+        <Route
+          path="/reset-password"
+          element={<ResetPasswordPage />}
+        />
+
+        {/* Protected Dashboard Routes */}
+        <Route
+          path="/"
+          element={
+            isAuthenticated ? (
+              <DashboardLayout
+                user={user || { name: 'Admin', email: 'admin@gmail.com', role: 'Administrator', avatar: 'male' }}
+                onLogout={handleLogout}
+                onUpdateUser={setUser}
+              />
+            ) : (
+              <Navigate to="/login" replace />
+            )
+          }
+        >
+          {/* Default Root Redirect to Role-based Landing Route */}
+          <Route index element={<Navigate to={getDefaultLandingRoute(user)} replace />} />
+
+          {/* Core App Pages */}
+          <Route
+            path="dashboard"
+            element={
+              <DashboardPage
+                user={user || { name: 'Admin', email: 'admin@gmail.com', role: 'Administrator', avatar: 'male' }}
+                onUpdateUser={setUser}
+              />
+            }
+          />
+
+          {/* Inward Routes */}
+          <Route path="inward" element={<InwardBillPage />} />
+          <Route path="inward/edit/:id" element={<InwardBillPage />} />
+          <Route path="inward/:id" element={<InwardBillPage />} />
+          <Route path="inward-list" element={<InwardReportsPage />} />
+          <Route path="inward-reports" element={<Navigate to="/inward-list" replace />} />
+
+          {/* Quotations Routes */}
+          <Route path="quotations" element={<CreateQuotationPage />} />
+          <Route path="quotations/create" element={<CreateQuotationPage />} />
+          <Route path="create-quotation" element={<Navigate to="/quotations" replace />} />
+          <Route path="quotations/list" element={<AllQuotationsPage />} />
+          <Route path="quotations-list" element={<Navigate to="/quotations/list" replace />} />
+
+          {/* Outward / Billing Routes */}
+          <Route path="outward" element={<CreateBillPage />} />
+          <Route path="create-bill" element={<Navigate to="/outward" replace />} />
+          <Route path="outward-list" element={<AllBillsPage />} />
+          <Route path="all-bills" element={<Navigate to="/outward-list" replace />} />
+          <Route path="bills" element={<Navigate to="/outward-list" replace />} />
+
+          {/* Service Module Routes (2 dedicated menus) */}
+          <Route path="services/new" element={<CreateServiceBillPage />} />
+          <Route path="services/list" element={<AllServicesPage />} />
+          <Route path="services" element={<Navigate to="/services/list" replace />} />
+          <Route path="service" element={<Navigate to="/services/list" replace />} />
+          <Route path="new-service" element={<Navigate to="/services/new" replace />} />
+
+          {/* Category Routes */}
+          <Route path="categories" element={<CategoriesPage />} />
+
+          {/* Material Routes */}
+          <Route path="materials" element={<AllMaterialsPage />} />
+          <Route path="all-materials" element={<Navigate to="/materials" replace />} />
+          <Route path="materials/add" element={<AddMaterialPage />} />
+          <Route path="add-material" element={<Navigate to="/materials/add" replace />} />
+
+          {/* Stock & Inventory Routes */}
+          <Route path="inventory" element={<InventoryPage />} />
+          <Route path="stock" element={<Navigate to="/inventory" replace />} />
+          <Route path="inventory/returns" element={<ReturnsAdjustmentsPage />} />
+          <Route path="returns" element={<Navigate to="/inventory/returns" replace />} />
+          <Route path="returns-adjustments" element={<Navigate to="/inventory/returns" replace />} />
+
+          {/* Roles, Users & Departments Routes (Tabbed) */}
+          <Route path="departments" element={<DepartmentListPage />} />
+          <Route path="departments/list" element={<Navigate to="/departments" replace />} />
+          <Route path="departments/add" element={<DepartmentListPage />} />
+          <Route path="roles" element={<RoleListPage />} />
+          <Route path="roles/list" element={<Navigate to="/roles" replace />} />
+          <Route path="roles/add" element={<RoleListPage />} />
+          <Route path="users" element={<UserListPage />} />
+          <Route path="users/list" element={<Navigate to="/users" replace />} />
+          <Route path="users/add" element={<UserListPage />} />
+
+          {/* Settings Routes */}
+          <Route
+            path="settings/profile"
+            element={<ProfileSettingsPage user={user} onUpdateUser={setUser} />}
+          />
+          <Route path="profile-settings" element={<Navigate to="/settings/profile" replace />} />
+          <Route path="profile" element={<Navigate to="/settings/profile" replace />} />
+
+          <Route path="settings/system" element={<SystemSettingsPage />} />
+          <Route path="system-settings" element={<Navigate to="/settings/system" replace />} />
+
+          <Route path="settings/configurations" element={<ConfigurationsSettingsPage />} />
+          <Route path="configurations-settings" element={<Navigate to="/settings/configurations" replace />} />
+
+          <Route path="settings/theme" element={<ThemeSettingsPage />} />
+          <Route path="theme-settings" element={<Navigate to="/settings/theme" replace />} />
+
+          {/* User Manual Route */}
+          <Route path="user-manual" element={<UserManualPage />} />
+          <Route path="manual" element={<Navigate to="/user-manual" replace />} />
+
+          {/* Fallback Wildcard Route */}
+          <Route path="*" element={<Navigate to="/dashboard" replace />} />
+        </Route>
+      </Routes>
+    </BrowserRouter>
+      </SettingsProvider>
+  </ThemeProvider>
+  )
+}

@@ -1,0 +1,225 @@
+import React from 'react'
+
+export default function TemplateSummaryGrid({
+  // Bank Details
+  bankAccountName = '',
+  bankName = '',
+  bankAccountNo = '',
+  bankIfsc = '',
+  bankBranch = '',
+  bankImageUrl = '',
+  hideBankDetails = false,
+  hideQrCode = false,
+  // Terms & Conditions
+  termsList = [],
+  // Calculation / Tax Breakdown
+  totalDiscountSavings = 0,
+  totalGrossOrigAmt = 0,
+  taxableAmount = 0,
+  isGstInvoice = false,
+  isIntraState = true,
+  cgstRate = 9,
+  cgstAmount = 0,
+  sgstRate = 9,
+  sgstAmount = 0,
+  igstRate = 18,
+  igstAmount = 0,
+  roundOff = 0,
+  totalAmount = 0,
+  amountInWords = '',
+  totalLabel = 'Invoice Total',
+  // Authorized Signatory
+  signatureUrl = '',
+  companyName = '',
+  // Custom slot overrides
+  customLeftContent = null,
+  customCenterContent = null,
+  customTaxRows = null
+}) {
+  const hasTwoCols = hideQrCode
+
+  return (
+    <div className="grid grid-cols-12 gap-4 pt-2 text-[#292424] font-['Arial',Helvetica,sans-serif]">
+      {/* Left Column (5/12 or 7/12): Bank Details & Terms & Conditions */}
+      <div className={`${hasTwoCols ? 'col-span-7' : 'col-span-5'} space-y-2.5`}>
+        {customLeftContent || (
+          <>
+            {/* Bank Details */}
+            {!hideBankDetails && (
+              <div className="space-y-0.5 text-[10.5px]">
+                <span className="font-bold text-[#292424] uppercase tracking-wider block text-[11px] mb-0.5">
+                  BANK DETAILS
+                </span>
+                <div className="space-y-0.5 text-gray-800 text-[10.5px] font-normal">
+                  <div><span className="font-normal text-gray-700">Beneficiary:</span> {bankAccountName}</div>
+                  <div><span className="font-normal text-gray-700">Bank:</span> {bankName}</div>
+                  <div><span className="font-normal text-gray-700">Account No:</span> <span className="font-normal text-[#292424]">{bankAccountNo}</span></div>
+                  <div><span className="font-normal text-gray-700">IFSC Code:</span> <span className="font-normal text-[#292424]">{bankIfsc}</span></div>
+                  <div><span className="font-normal text-gray-700">Branch:</span> {bankBranch}</div>
+                </div>
+              </div>
+            )}
+
+            {/* Terms & Conditions */}
+            {termsList && termsList.length > 0 && (
+              <div className="space-y-0.5 text-[10.5px] pt-0.5">
+                <span className="font-bold text-[#292424] uppercase tracking-wider block text-[11px] mb-0.5">
+                  TERMS &amp; CONDITIONS
+                </span>
+                <ol className="list-decimal list-inside space-y-0.5 text-gray-700 leading-snug font-normal">
+                  {termsList.map((t, idx) => (
+                    <li key={idx} className="leading-tight">{t}</li>
+                  ))}
+                </ol>
+              </div>
+            )}
+          </>
+        )}
+      </div>
+
+      {/* Center Column (3/12): Scan to Pay & Large QR */}
+      {!hideQrCode && (
+        <div className="col-span-3 flex flex-col items-center justify-start text-center pt-1">
+          {customCenterContent || (
+            <>
+              <span className="text-[11px] font-bold uppercase text-[#292424] tracking-wider mb-2">
+                SCAN TO PAY
+              </span>
+              {bankImageUrl ? (
+                <div className="flex items-center justify-center" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <img
+                    src={bankImageUrl}
+                    alt="Scan to Pay QR"
+                    className="h-28 w-28 max-h-32 max-w-full object-contain mx-auto"
+                    style={{
+                      width: '110px',
+                      height: '110px',
+                      maxWidth: '120px',
+                      maxHeight: '120px',
+                      objectFit: 'contain',
+                      display: 'block',
+                      margin: '0 auto'
+                    }}
+                    width="110"
+                    height="110"
+                  />
+                </div>
+              ) : (
+                <div className="h-28 w-28 flex items-center justify-center text-[10.5px] text-gray-400 italic font-normal">
+                  No QR Image
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      )}
+
+      {/* Right Column: Tax Breakdown, Discount Savings & Totals */}
+      <div className={`${hasTwoCols ? 'col-span-5' : 'col-span-4'} flex flex-col justify-between text-[#292424] pl-1`}>
+        {/* Tax Computation Table */}
+        <div className="space-y-0.5 text-[10.5px] font-normal">
+          {customTaxRows || (
+            <>
+              <div className="flex justify-between text-gray-700 py-0.5 text-[10.5px]">
+                <span>Gross Amount</span>
+                <span className="text-[#292424]">
+                  {parseFloat(totalGrossOrigAmt || taxableAmount || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </span>
+              </div>
+              {totalDiscountSavings > 0 && (
+                <div className="flex justify-between py-0.5 text-[10.5px] font-bold text-emerald-700">
+                  <span>Discount Savings</span>
+                  <span>
+                    - {parseFloat(totalDiscountSavings || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </span>
+                </div>
+              )}
+
+              <div className="flex justify-between text-gray-700 py-0.5">
+                <span>Taxable Amount</span>
+                <span className="font-bold text-[#292424]">
+                  {parseFloat(taxableAmount || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </span>
+              </div>
+
+              {isGstInvoice && (
+                <>
+                  {isIntraState ? (
+                    <>
+                      <div className="flex justify-between text-gray-700 py-0.5 text-[10.5px]">
+                        <span>CGST ({parseFloat(cgstRate || 9).toFixed(2)}%)</span>
+                        <span className="text-[#292424]">
+                          {parseFloat(cgstAmount || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </span>
+                      </div>
+                      <div className="flex justify-between text-gray-700 py-0.5 text-[10.5px]">
+                        <span>SGST ({parseFloat(sgstRate || 9).toFixed(2)}%)</span>
+                        <span className="text-[#292424]">
+                          {parseFloat(sgstAmount || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </span>
+                      </div>
+                    </>
+                  ) : (
+                    <div className="flex justify-between text-gray-700 py-0.5 text-[10.5px]">
+                      <span>IGST ({parseFloat(igstRate || 18).toFixed(2)}%)</span>
+                      <span className="text-[#292424]">
+                        {parseFloat(igstAmount || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      </span>
+                    </div>
+                  )}
+                </>
+              )}
+
+              {roundOff && parseFloat(roundOff) !== 0 && (
+                <div className="flex justify-between text-gray-500 py-0.5 text-[10.5px]">
+                  <span>Round Off</span>
+                  <span className="text-[#292424]">
+                    {parseFloat(roundOff) > 0 ? `+${roundOff}` : `-${Math.abs(roundOff)}`}
+                  </span>
+                </div>
+              )}
+            </>
+          )}
+
+          {/* Grand Total Row */}
+          <div className="border-t border-b border-gray-400 py-1 my-0.5 flex justify-between items-center text-[11px] font-bold uppercase text-[#292424]">
+            <span>{totalLabel}</span>
+            <span className="text-[12px] font-bold text-[#111827]">
+              {parseFloat(totalAmount || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+            </span>
+          </div>
+
+          {/* Amount in Words */}
+          {amountInWords && (
+            <div className="pt-0.5 text-[10px] text-gray-600 leading-tight">
+              <strong className="text-gray-800 font-bold">In Words: </strong>
+              <span className="italic text-[#292424] font-normal capitalize">
+                {amountInWords}
+              </span>
+            </div>
+          )}
+        </div>
+
+        {/* Authorized Signatory Block */}
+        <div className="pt-2 text-center space-y-0.5">
+          {signatureUrl && (
+            <div className="flex justify-center items-center h-10 mb-1" style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '40px' }}>
+              <img
+                src={signatureUrl}
+                alt="Authorized Signature"
+                className="max-h-10 max-w-[140px] object-contain"
+                style={{ maxHeight: '40px', maxWidth: '140px', objectFit: 'contain', display: 'block', margin: '0 auto' }}
+              />
+            </div>
+          )}
+          <div className="w-full border-t border-gray-400 pt-1">
+            <p className="text-[9.5px] text-gray-600 font-medium">Authorized signatory for</p>
+            <p className="text-[10.5px] font-black text-[#111827] uppercase tracking-wide">
+              {companyName}
+            </p>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}

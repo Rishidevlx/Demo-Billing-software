@@ -1,0 +1,1198 @@
+import { useState, useEffect, useMemo } from 'react'
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
+import {
+  Building2,
+  FileText,
+  RotateCcw,
+  Save,
+  IndianRupee,
+  UploadCloud,
+  FileCheck,
+  X,
+  CheckCircle2,
+  ArrowLeft,
+  Boxes,
+  Maximize2,
+  List
+} from '../components/common/icons'
+import Swal from 'sweetalert2'
+import SearchableSelect from '../components/common/SearchableSelect'
+import InwardLineItems from '../components/inward/InwardLineItems'
+import { BillSummaryCard } from '../components/billing'
+import { Button } from '../components/ui'
+import { API_ENDPOINTS } from '../config/api' 
+import { getUserPermissions } from '../utils/access'
+
+const getLocalDateString = (dateVal) => {
+  if (!dateVal) return ''
+  const d = new Date(dateVal)
+  if (isNaN(d.getTime())) {
+    if (typeof dateVal === 'string') {
+      const m = dateVal.match(/^(\d{4}-\d{2}-\d{2})/)
+      if (m) return m[1]
+    }
+    return ''
+  }
+  const year = d.getFullYear()
+  const month = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
+}
+
+const INDIAN_STATES = [
+  '01 - Jammu & Kashmir',
+  '02 - Himachal Pradesh',
+  '03 - Punjab',
+  '04 - Chandigarh',
+  '05 - Uttarakhand',
+  '06 - Haryana',
+  '07 - Delhi',
+  '08 - Rajasthan',
+  '09 - Uttar Pradesh',
+  '10 - Bihar',
+  '11 - Sikkim',
+  '12 - Arunachal Pradesh',
+  '13 - Nagaland',
+  '14 - Manipur',
+  '15 - Mizoram',
+  '16 - Tripura',
+  '17 - Meghalaya',
+  '18 - Assam',
+  '19 - West Bengal',
+  '20 - Jharkhand',
+  '21 - Odisha',
+  '22 - Chhattisgarh',
+  '23 - Madhya Pradesh',
+  '24 - Gujarat',
+  '26 - Dadra and Nagar Haveli and Daman & Diu',
+  '27 - Maharashtra',
+  '29 - Karnataka',
+  '30 - Goa',
+  '31 - Lakshadweep',
+  '32 - Kerala',
+  '33 - Tamil Nadu',
+  '34 - Puducherry',
+  '35 - Andaman and Nicobar Islands',
+  '36 - Telangana',
+  '37 - Andhra Pradesh',
+  '38 - Ladakh'
+]
+
+export default function InwardBillPage() {
+  const navigate = useNavigate()
+  const { id } = useParams()
+  const [searchParams] = useSearchParams()
+  const editId = id || searchParams.get('id')
+  const isEditMode = Boolean(editId)
+
+  const { can } = getUserPermissions()
+  const canAddInward = can('inward', 'Add')
+  const canEditInward = can('inward', 'Edit')
+  const canSaveInward = isEditMode ? canEditInward : canAddInward
+
+  const [isLoading, setIsLoading] = useState(false)
+  const [isSaving, setIsSaving] = useState(false)
+
+  // Materials & Settings from API
+  const [materials, setMaterials] = useState([])
+  const [categories, setCategories] = useState([])
+  const [settings, setSettings] = useState(null)
+
+  // Inward Meta Specifications
+  const [inwardNumber, setInwardNumber] = useState('INW-2026-01')
+  const [inwardDate, setInwardDate] = useState(getLocalDateString(new Date()))
+
+  // Step 1: Supplier / Vendor Details
+  const [supplierName, setSupplierName] = useState('')
+  const [supplierPhone, setSupplierPhone] = useState('')
+  const [supplierEmail, setSupplierEmail] = useState('')
+  const [supplierLocation, setSupplierLocation] = useState('33 - Tamil Nadu')
+  const [supplierGstin, setSupplierGstin] = useState('')
+
+  // Hardcopy Bill Upload (Cloudinary storage)
+  const [uploadedBill, setUploadedBill] = useState(null)
+  const [hardcopyUrl, setHardcopyUrl] = useState('')
+  const [isUploadingBill, setIsUploadingBill] = useState(false)
+  const [isDragging, setIsDragging] = useState(false)
+
+  // Step 2: Inward Materials Line Items
+  const [items, setItems] = useState([
+    {
+      material_id: '',
+      item_name: '',
+      description: '',
+      hsn_code: '',
+      quantity: 1,
+      unit: 'NOS',
+      rate: 0,
+      amount: 0,
+      has_serial: false,
+      serial_numbers: ['']
+    }
+  ])
+
+  // Top-Right Toast Notification Setup
+  const Toast = Swal.mixin({
+    toast: true,
+    position: 'top-end',
+    showConfirmButton: false,
+    timer: 2000,
+    timerProgressBar: true,
+    didOpen: (toast) => {
+      toast.addEventListener('mouseenter', Swal.stopTimer)
+      toast.addEventListener('mouseleave', Swal.resumeTimer)
+    }
+  })
+
+  // Load Materials, Settings & Next Inward Number (or Edit Inward Record) on component mount
+  useEffect(() => {
+    const loadInitialData = async () => {
+      try {
+        setIsLoading(true)
+        const [matRes, catRes, setRes] = await Promise.all([
+          fetch(API_ENDPOINTS.MATERIALS),
+          fetch(API_ENDPOINTS.CATEGORIES),
+          fetch(API_ENDPOINTS.SETTINGS)
+        ])
+        const matData = await matRes.json()
+        const catData = await catRes.json()
+        const setData = await setRes.json()
+
+        if (matData.success && matData.materials) {
+          setMaterials(matData.materials.filter(m => m.status === 'Active'))
+        }
+        if (catData.success && catData.categories) {
+          setCategories(catData.categories.filter(c => c.status === 'Active'))
+        }
+        if (setData.success && setData.settings) {
+          setSettings(setData.settings)
+        }
+
+        if (editId) {
+          // Fetch existing inward record for editing
+          const editRes = await fetch(API_ENDPOINTS.INWARD_BY_ID(editId))
+          const editData = await editRes.json()
+          if (editData.success && editData.inward) {
+            const inv = editData.inward
+            setInwardNumber(inv.inward_number || '')
+            setInwardDate(getLocalDateString(inv.inward_date))
+            setSupplierName(inv.supplier_name || '')
+            setSupplierPhone(inv.supplier_phone || '')
+            setSupplierEmail(inv.supplier_email || '')
+            setSupplierLocation(inv.supplier_location || '33 - Tamil Nadu')
+            setSupplierGstin(inv.supplier_gstin || '')
+            setHardcopyUrl(inv.hardcopy_url || '')
+
+            if (inv.items && inv.items.length > 0) {
+              setItems(inv.items.map(it => {
+                let serials = []
+                if (Array.isArray(it.serial_numbers_list)) {
+                  serials = it.serial_numbers_list
+                } else if (Array.isArray(it.serial_numbers)) {
+                  serials = it.serial_numbers
+                } else if (typeof it.serial_numbers === 'string' && it.serial_numbers.trim()) {
+                  try {
+                    serials = JSON.parse(it.serial_numbers)
+                  } catch (e) {
+                    serials = it.serial_numbers.split(',').map(s => s.trim()).filter(Boolean)
+                  }
+                }
+                return {
+                  id: it.id,
+                  material_id: it.material_id ? String(it.material_id) : '',
+                  item_name: it.item_name || '',
+                  description: it.description || '',
+                  hsn_code: it.hsn_code || '',
+                  quantity: parseFloat(it.quantity) || 1,
+                  unit: it.unit || 'NOS',
+                  rate: parseFloat(it.rate) || 0,
+                  amount: parseFloat(it.amount) || 0,
+                  has_serial: Boolean(it.has_serial),
+                  serial_numbers: serials.length > 0 ? serials : [''],
+                  sold_serials: it.sold_serials || []
+                }
+              }))
+            }
+          } else {
+            Swal.fire({
+              icon: 'error',
+              title: 'Inward Entry Not Found',
+              text: 'Could not load the specified inward record for editing.',
+              confirmButtonColor: '#FF8533'
+            }).then(() => navigate('/inward-list'))
+          }
+        } else {
+          // New Inward: fetch next inward number
+          try {
+            const numRes = await fetch(API_ENDPOINTS.NEXT_INWARD_NUMBER)
+            const numData = await numRes.json()
+            if (numData.success && numData.nextInwardNumber) {
+              setInwardNumber(numData.nextInwardNumber)
+            }
+          } catch (numErr) {
+            console.error('Error fetching next inward number:', numErr)
+          }
+        }
+      } catch (err) {
+        console.error('Error fetching data for inward bill:', err)
+      } finally {
+        setIsLoading(false)
+      }
+    }
+
+    loadInitialData()
+  }, [editId])
+
+  // Check if Place of Supply is Intra-State (Tamil Nadu)
+  const isIntraState = supplierLocation.includes('33') || supplierLocation.toLowerCase().includes('tamil nadu')
+
+  // Tax rates
+  const defaultCgst = settings ? parseFloat(settings.cgst_rate) || 9.00 : 9.00
+  const defaultSgst = settings ? parseFloat(settings.sgst_rate) || 9.00 : 9.00
+  const defaultIgst = settings ? parseFloat(settings.igst_rate) || 18.00 : 18.00
+
+  // Helper to calculate line item pricing and taxes for Inward (Supports MRP Inclusive & B2B Exclusive)
+  const calculateInwardItem = (item, isIntra = isIntraState) => {
+    const qty = parseFloat(item.quantity) || 0
+    const rawRate = parseFloat(item.raw_rate !== undefined ? item.raw_rate : item.rate) || 0
+    const isTaxInclusive = item.tax_inclusive !== false && item.tax_inclusive !== 0 && item.tax_inclusive !== '0'
+
+    const cgstRate = settings ? parseFloat(settings.cgst_rate) || 9.00 : 9.00
+    const sgstRate = settings ? parseFloat(settings.sgst_rate) || 9.00 : 9.00
+    const igstRate = settings ? parseFloat(settings.igst_rate) || 18.00 : 18.00
+    const rateOfTax = isIntra ? (cgstRate + sgstRate) : igstRate
+
+    let unitRate = 0
+    let taxable = 0
+    let taxAmt = 0
+    let totalAmt = 0
+
+    if (rateOfTax > 0) {
+      if (isTaxInclusive) {
+        // Tax Inclusive (MRP Model): Entered purchase rate includes GST -> split tax out
+        totalAmt = parseFloat((qty * rawRate).toFixed(2))
+        unitRate = parseFloat((rawRate / (1 + rateOfTax / 100)).toFixed(2))
+        taxable = parseFloat((qty * unitRate).toFixed(2))
+        taxAmt = parseFloat((totalAmt - taxable).toFixed(2))
+      } else {
+        // Tax Exclusive (+GST / B2B Model): Entered purchase rate does NOT include GST -> add on top
+        unitRate = parseFloat(rawRate.toFixed(2))
+        taxable = parseFloat((qty * unitRate).toFixed(2))
+        taxAmt = parseFloat((taxable * (rateOfTax / 100)).toFixed(2))
+        totalAmt = parseFloat((taxable + taxAmt).toFixed(2))
+      }
+    } else {
+      unitRate = parseFloat(rawRate.toFixed(2))
+      taxable = parseFloat((qty * unitRate).toFixed(2))
+      taxAmt = 0
+      totalAmt = taxable
+    }
+
+    return {
+      ...item,
+      raw_rate: rawRate,
+      rate: isTaxInclusive ? unitRate : rawRate,
+      tax_inclusive: isTaxInclusive,
+      tax_rate: rateOfTax,
+      taxable_amount: taxable,
+      tax_amount: taxAmt,
+      amount: totalAmt
+    }
+  }
+
+  // Calculations
+  const totalQuantity = items.reduce((sum, it) => sum + (parseFloat(it.quantity) || 0), 0)
+  const totalTaxableAmount = items.reduce((sum, it) => {
+    const calc = it.taxable_amount !== undefined ? it : calculateInwardItem(it, isIntraState)
+    return sum + (parseFloat(calc.taxable_amount) || 0)
+  }, 0)
+  const totalTaxAmount = items.reduce((sum, it) => {
+    const calc = it.tax_amount !== undefined ? it : calculateInwardItem(it, isIntraState)
+    return sum + (parseFloat(calc.tax_amount) || 0)
+  }, 0)
+  const cgstAmount = isIntraState ? parseFloat((totalTaxAmount / 2).toFixed(2)) : 0
+  const sgstAmount = isIntraState ? parseFloat((totalTaxAmount - cgstAmount).toFixed(2)) : 0
+  const igstAmount = !isIntraState ? totalTaxAmount : 0
+  const grandTotalAmount = items.reduce((sum, it) => {
+    const calc = it.amount !== undefined ? it : calculateInwardItem(it, isIntraState)
+    return sum + (parseFloat(calc.amount) || 0)
+  }, 0)
+
+  // Find Duplicate Serial Numbers across all line items
+  const duplicateSerials = useMemo(() => {
+    const counts = {}
+    items.forEach(item => {
+      if (item.has_serial && Array.isArray(item.serial_numbers)) {
+        item.serial_numbers.forEach(s => {
+          const trimmed = (s || '').trim().toLowerCase()
+          if (trimmed) {
+            counts[trimmed] = (counts[trimmed] || 0) + 1
+          }
+        })
+      }
+    })
+    const duplicates = new Set()
+    Object.entries(counts).forEach(([val, count]) => {
+      if (count > 1) {
+        duplicates.add(val)
+      }
+    })
+    return duplicates
+  }, [items])
+
+  // Keyboard Shortcuts: Alt+A (Add Item), Ctrl+Enter (Save), Alt+R (Reset), Alt+F (Fullscreen)
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if ((e.ctrlKey || e.metaKey) && (e.key === 'Enter' || e.key === 's')) {
+        e.preventDefault()
+        handleSubmit(e)
+      } else if (e.altKey && (e.key === 'a' || e.key === 'A')) {
+        e.preventDefault()
+        handleAddItem()
+      } else if (e.altKey && (e.key === 'r' || e.key === 'R')) {
+        e.preventDefault()
+        handleReset()
+      } else if (e.altKey && (e.key === 'f' || e.key === 'F')) {
+        e.preventDefault()
+        if (!document.fullscreenElement) {
+          document.documentElement.requestFullscreen().catch(() => {})
+        } else {
+          document.exitFullscreen().catch(() => {})
+        }
+      }
+    }
+
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [items, supplierName, supplierPhone, supplierEmail, supplierLocation, supplierGstin, inwardDate, duplicateSerials])
+
+  // State options for Location
+  const stateOptions = INDIAN_STATES.map(st => ({
+    value: st,
+    label: st
+  }))
+
+  // Material dropdown options for SearchableSelect
+  const materialOptions = materials.map(m => ({
+    value: m.id,
+    label: m.name,
+    subLabel: `${m.category_name ? `[${m.category_name}] • ` : ''}Rate: ₹${m.selling_price || 0} / ${m.unit || 'NOS'}${m.hsn_code ? ` • HSN: ${m.hsn_code}` : ''}`
+  }))
+
+  // Handle Material Select (Auto-populates HSN, Unit, Rate as non-editable)
+  const handleMaterialSelect = (index, materialId) => {
+    const selectedMat = materials.find(m => String(m.id) === String(materialId))
+
+    if (selectedMat) {
+      // Check if item already selected in another row
+      const isDuplicate = items.some((it, i) => i !== index && String(it.material_id) === String(materialId))
+      if (isDuplicate) {
+        Toast.fire({
+          icon: 'warning',
+          title: `"${selectedMat.name}" is already added to inward list.`
+        })
+      }
+    }
+
+    setItems(prev => {
+      const updated = [...prev]
+      if (selectedMat) {
+        const qty = Math.min(100, Math.max(1, parseFloat(updated[index].quantity) || 1))
+        const rate = parseFloat(selectedMat.purchase_price || selectedMat.selling_price || 0)
+        const hasSerial = Boolean(selectedMat.serial_tracking || selectedMat.has_serial)
+        const qtyCount = Math.min(100, Math.max(1, Math.floor(qty)))
+
+        let currentSerials = updated[index].serial_numbers || []
+        if (hasSerial) {
+          currentSerials = Array.from({ length: qtyCount }, (_, i) => currentSerials[i] || '')
+        }
+
+        const rawItem = {
+          ...updated[index],
+          material_id: selectedMat.id,
+          item_name: selectedMat.name,
+          hsn_code: selectedMat.hsn_code || '',
+          unit: selectedMat.unit || 'NOS',
+          quantity: qty,
+          raw_rate: rate,
+          rate: rate,
+          tax_inclusive: selectedMat.tax_inclusive !== false && selectedMat.tax_inclusive !== 0 && selectedMat.tax_inclusive !== '0',
+          description: selectedMat.description || '',
+          has_serial: hasSerial,
+          serial_numbers: currentSerials
+        }
+        updated[index] = calculateInwardItem(rawItem, isIntraState)
+      } else {
+        updated[index] = {
+          ...updated[index],
+          material_id: '',
+          item_name: '',
+          hsn_code: '',
+          raw_rate: 0,
+          rate: 0,
+          tax_inclusive: false,
+          taxable_amount: 0,
+          tax_amount: 0,
+          amount: 0
+        }
+      }
+      return updated
+    })
+  }
+
+  // Handle Item Field Change with Max 100 Quantity Constraint
+  const handleItemChange = (index, field, value) => {
+    setItems(prev => {
+      const updated = [...prev]
+      let finalVal = value
+
+      if (field === 'quantity') {
+        const num = parseFloat(value)
+        if (isNaN(num) || num < 1) {
+          finalVal = value === '' ? '' : 1
+        } else if (num > 100) {
+          finalVal = 100
+        } else {
+          finalVal = Math.floor(num)
+        }
+      }
+
+      let currentItem = { ...updated[index], [field]: finalVal }
+
+      if (field === 'rate') {
+        currentItem.raw_rate = parseFloat(finalVal) || 0
+      }
+
+      // Adjust serial numbers array length if quantity changes and has_serial is enabled
+      if (field === 'quantity' && currentItem.has_serial) {
+        const qtyCount = Math.min(100, Math.max(1, Math.floor(parseFloat(finalVal) || 1)))
+        const existingSerials = currentItem.serial_numbers || []
+        currentItem.serial_numbers = Array.from({ length: qtyCount }, (_, i) => existingSerials[i] || '')
+      }
+
+      updated[index] = calculateInwardItem(currentItem, isIntraState)
+      return updated
+    })
+  }
+
+  // Toggle Serial Number enable/disable
+  const handleToggleSerial = (index) => {
+    setItems(prev => {
+      const updated = [...prev]
+      const newHasSerial = !updated[index].has_serial
+      const qtyCount = Math.min(100, Math.max(1, Math.floor(parseFloat(updated[index].quantity) || 1)))
+
+      updated[index] = {
+        ...updated[index],
+        has_serial: newHasSerial,
+        serial_numbers: newHasSerial
+          ? Array.from({ length: qtyCount }, (_, i) => updated[index].serial_numbers?.[i] || '')
+          : []
+      }
+      return updated
+    })
+  }
+
+  // Handle individual serial number change
+  const handleSerialNumberChange = (itemIndex, serialIndex, val) => {
+    setItems(prev => {
+      const updated = [...prev]
+      const serials = [...(updated[itemIndex].serial_numbers || [])]
+      serials[serialIndex] = val
+      updated[itemIndex].serial_numbers = serials
+      return updated
+    })
+  }
+
+  // Add Item Row (Alt+A)
+  const handleAddItem = () => {
+    setItems(prev => [
+      ...prev,
+      {
+        material_id: '',
+        item_name: '',
+        description: '',
+        hsn_code: '',
+        quantity: 1,
+        unit: 'NOS',
+        rate: 0,
+        amount: 0,
+        has_serial: false,
+        serial_numbers: ['']
+      }
+    ])
+  }
+
+  // Duplicate Item Row (Shows toast)
+  const handleDuplicateItem = (index) => {
+    const itemToClone = items[index]
+    const qtyCount = Math.min(100, Math.max(1, Math.floor(itemToClone.quantity || 1)))
+    setItems(prev => [
+      ...prev.slice(0, index + 1),
+      {
+        ...itemToClone,
+        serial_numbers: itemToClone.has_serial
+          ? Array.from({ length: qtyCount }, () => '')
+          : []
+      },
+      ...prev.slice(index + 1)
+    ])
+    Toast.fire({
+      icon: 'success',
+      title: 'Line item duplicated'
+    })
+  }
+
+  // Remove Item Row (Shows top-right SweetAlert toast)
+  const handleRemoveItem = (index) => {
+    if (items.length === 1) {
+      Swal.fire({
+        icon: 'warning',
+        title: 'At least one material required',
+        text: 'An Inward bill must have at least one line item.',
+        confirmButtonColor: '#FF8533'
+      })
+      return
+    }
+    const itemToRemove = items[index]
+    const itemName = itemToRemove.item_name ? `"${itemToRemove.item_name}"` : `Item #${index + 1}`
+    setItems(prev => prev.filter((_, i) => i !== index))
+    Toast.fire({
+      icon: 'info',
+      title: `${itemName} deleted`
+    })
+  }
+
+  // Helper function to compress images before uploading
+  const compressImageFile = (file) => {
+    return new Promise((resolve) => {
+      if (!file.type || !file.type.startsWith('image/')) {
+        // For non-images (like PDF), return raw base64
+        const reader = new FileReader()
+        reader.onload = (e) => resolve(e.target.result)
+        reader.readAsDataURL(file)
+        return
+      }
+
+      const reader = new FileReader()
+      reader.onload = (e) => {
+        const img = new Image()
+        img.onload = () => {
+          const canvas = document.createElement('canvas')
+          let width = img.width
+          let height = img.height
+          const maxDimension = 1600 // High clarity while reducing file size drastically
+
+          if (width > maxDimension || height > maxDimension) {
+            if (width > height) {
+              height = Math.round((height * maxDimension) / width)
+              width = maxDimension
+            } else {
+              width = Math.round((width * maxDimension) / height)
+              height = maxDimension
+            }
+          }
+
+          canvas.width = width
+          canvas.height = height
+          const ctx = canvas.getContext('2d')
+          ctx.drawImage(img, 0, 0, width, height)
+
+          // Compress to JPEG with 0.75 quality (~80-90% smaller file size)
+          const compressedBase64 = canvas.toDataURL('image/jpeg', 0.75)
+          resolve(compressedBase64)
+        }
+        img.onerror = () => {
+          resolve(e.target.result)
+        }
+        img.src = e.target.result
+      }
+      reader.readAsDataURL(file)
+    })
+  }
+
+  // Handle File Upload (5MB limit & compression before uploading to Cloudinary)
+  const handleFileUpload = async (file) => {
+    if (!file) return
+
+    // 1. Validation: Max Limit 5MB
+    const MAX_SIZE_BYTES = 5 * 1024 * 1024
+    if (file.size > MAX_SIZE_BYTES) {
+      Swal.fire({
+        icon: 'error',
+        title: 'File Too Large',
+        text: 'The selected bill file exceeds the 5MB limit. Please upload a file under 5MB.',
+        confirmButtonColor: '#FF8533'
+      })
+      return
+    }
+
+    // 2. Validation: Allowed File Types (Images and PDFs)
+    const allowedTypes = ['image/jpeg', 'image/png', 'image/webp', 'image/jpg', 'application/pdf']
+    if (file.type && !allowedTypes.includes(file.type.toLowerCase())) {
+      Swal.fire({
+        icon: 'warning',
+        title: 'Invalid File Format',
+        text: 'Please upload an image (JPG, PNG, WEBP) or a PDF document.',
+        confirmButtonColor: '#FF8533'
+      })
+      return
+    }
+
+    setUploadedBill(file)
+    setIsUploadingBill(true)
+
+    try {
+      // 3. Compress image on-the-fly
+      const processedDataUrl = await compressImageFile(file)
+
+      const res = await fetch(API_ENDPOINTS.CLOUDINARY_UPLOAD, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          file: processedDataUrl,
+          folder: 'simcha_billing/inward_bills'
+        })
+      })
+      const data = await res.json()
+      if (data.success && data.url) {
+        setHardcopyUrl(data.url)
+        Toast.fire({
+          icon: 'success',
+          title: 'Bill compressed & uploaded to Cloudinary'
+        })
+      } else {
+        setHardcopyUrl(processedDataUrl)
+        Toast.fire({
+          icon: 'info',
+          title: 'Hardcopy bill attached'
+        })
+      }
+    } catch (err) {
+      console.error('Error uploading bill:', err)
+      const rawBase64 = await new Promise((res) => {
+        const r = new FileReader()
+        r.onload = (e) => res(e.target.result)
+        r.readAsDataURL(file)
+      })
+      setHardcopyUrl(rawBase64)
+      Toast.fire({
+        icon: 'info',
+        title: 'Hardcopy bill attached'
+      })
+    } finally {
+      setIsUploadingBill(false)
+    }
+  }
+
+  const handleReset = () => {
+    setSupplierName('')
+    setSupplierPhone('')
+    setSupplierEmail('')
+    setSupplierLocation('33 - Tamil Nadu')
+    setSupplierGstin('')
+    setInwardDate(new Date().toISOString().split('T')[0])
+    setUploadedBill(null)
+    setHardcopyUrl('')
+    setItems([
+      {
+        material_id: '',
+        item_name: '',
+        description: '',
+        hsn_code: '',
+        quantity: 1,
+        unit: 'NOS',
+        rate: 0,
+        amount: 0,
+        has_serial: false,
+        serial_numbers: ['']
+      }
+    ])
+  }
+
+  const handleSubmit = (e) => {
+    if (e && e.preventDefault) e.preventDefault()
+
+    if (!supplierName.trim()) {
+      Swal.fire({
+        icon: 'error',
+        title: 'Supplier Name Required',
+        text: 'Please enter the Supplier / Company Name.',
+        confirmButtonColor: '#FF8533'
+      })
+      return
+    }
+
+    const validItems = items.filter(it => it.item_name && it.item_name.trim() !== '')
+    if (validItems.length === 0) {
+      Swal.fire({
+        icon: 'error',
+        title: 'Materials Required',
+        text: 'Please select at least one material/item.',
+        confirmButtonColor: '#FF8533'
+      })
+      return
+    }
+
+    // 1. Check for Duplicate Serial Numbers within form
+    const seenSerials = new Set()
+    const duplicates = new Set()
+
+    for (let i = 0; i < items.length; i++) {
+      const it = items[i]
+      if (it.item_name && it.has_serial && Array.isArray(it.serial_numbers)) {
+        for (const sn of it.serial_numbers) {
+          const clean = String(sn || '').trim()
+          if (clean) {
+            const lower = clean.toLowerCase()
+            if (seenSerials.has(lower)) {
+              duplicates.add(clean)
+            }
+            seenSerials.add(lower)
+          }
+        }
+      }
+    }
+
+    if (duplicates.size > 0) {
+      const duplicateList = Array.from(duplicates).join(', ')
+      Swal.fire({
+        icon: 'error',
+        title: 'Duplicate Serial Numbers',
+        text: `Each serial number must be unique. Duplicate found in bill: "${duplicateList}"`,
+        confirmButtonColor: '#FF8533'
+      })
+      return
+    }
+
+    // 2. Validate that all serial number fields are filled if has_serial is true
+    for (let i = 0; i < items.length; i++) {
+      const it = items[i]
+      if (it.item_name && it.has_serial) {
+        const count = Math.min(100, Math.max(1, Math.floor(parseFloat(it.quantity) || 1)))
+        const serials = it.serial_numbers || []
+        for (let s = 0; s < count; s++) {
+          if (!serials[s] || !serials[s].trim()) {
+            Swal.fire({
+              icon: 'warning',
+              title: 'Missing Serial Number',
+              text: `Please enter Serial #${s + 1} for item "${it.item_name}" (Item ${i + 1}).`,
+              confirmButtonColor: '#FF8533'
+            })
+            return
+          }
+        }
+      }
+    }
+
+    // 3. Save to backend API (POST for new, PUT for edit)
+    const saveInwardToBackend = async () => {
+      try {
+        setIsSaving(true)
+        const payload = {
+          inward_number: inwardNumber,
+          inward_date: inwardDate,
+          supplier_name: supplierName,
+          supplier_phone: supplierPhone,
+          supplier_email: supplierEmail,
+          supplier_location: supplierLocation,
+          supplier_gstin: supplierGstin,
+          taxable_amount: totalTaxableAmount,
+          cgst_rate: isIntraState ? defaultCgst : 0,
+          cgst_amount: cgstAmount,
+          sgst_rate: isIntraState ? defaultSgst : 0,
+          sgst_amount: sgstAmount,
+          igst_rate: !isIntraState ? defaultIgst : 0,
+          igst_amount: igstAmount,
+          total_tax: totalTaxAmount,
+          total_amount: grandTotalAmount,
+          total_quantity: totalQuantity,
+          hardcopy_url: hardcopyUrl || null,
+          items: validItems.map(it => ({
+            material_id: it.material_id || null,
+            item_name: it.item_name,
+            description: it.description || '',
+            hsn_code: it.hsn_code || '',
+            quantity: parseFloat(it.quantity) || 1,
+            unit: it.unit || 'NOS',
+            rate: parseFloat(it.rate) || 0,
+            amount: parseFloat(it.amount) || 0,
+            has_serial: it.has_serial || false,
+            serial_numbers: it.has_serial ? (it.serial_numbers || []).filter(s => s && s.trim()) : []
+          }))
+        }
+
+        const url = isEditMode ? API_ENDPOINTS.INWARD_BY_ID(editId) : API_ENDPOINTS.INWARDS
+        const method = isEditMode ? 'PUT' : 'POST'
+
+        const res = await fetch(url, {
+          method,
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        })
+
+        const data = await res.json()
+
+        if (data.success) {
+          await Swal.fire({
+            icon: 'success',
+            title: isEditMode ? 'Inward Entry Updated!' : 'Inward Entry Saved!',
+            html: isEditMode
+              ? `Inward <b>#${data.inwardNumber || inwardNumber}</b> for <b>${supplierName}</b> has been updated successfully!`
+              : `Inward <b>#${data.inwardNumber || inwardNumber}</b> for <b>${supplierName}</b> with ${validItems.length} items (Total: <b>₹ ${grandTotalAmount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</b>) saved successfully!`,
+            confirmButtonColor: '#FF8533',
+            confirmButtonText: 'Go to Inward List'
+          })
+
+          navigate('/inward-list')
+        } else {
+          Swal.fire({
+            icon: 'error',
+            title: isEditMode ? 'Failed to Update Inward' : 'Failed to Save Inward',
+            text: data.message || 'Error occurred while saving inward bill.',
+            confirmButtonColor: '#FF8533'
+          })
+        }
+      } catch (err) {
+        console.error('Error saving inward entry:', err)
+        Swal.fire({
+          icon: 'error',
+          title: 'Server Error',
+          text: err.message || 'Failed to connect to backend server. Please check connection.',
+          confirmButtonColor: '#FF8533'
+        })
+      } finally {
+        setIsSaving(false)
+      }
+    }
+
+    saveInwardToBackend()
+  }
+
+  return (
+    <div className="space-y-6 font-['Poppins',sans-serif] pb-16 animate-in fade-in duration-200">
+
+      {/* 1. Page Header (Transparent Top Bar with Inward List Button) */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-gray-200/80 dark:border-slate-800 pb-3">
+        <div className="flex items-center gap-3">
+          {isEditMode && (
+            <button
+              type="button"
+              onClick={() => navigate('/inward-list')}
+              className="p-2 bg-gray-100 hover:bg-gray-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-gray-700 dark:text-slate-300 rounded-none transition-colors cursor-pointer"
+              title="Back to Inward List"
+            >
+              <ArrowLeft size={18} />
+            </button>
+          )}
+          <div>
+            <h1 className="text-xl font-bold tracking-tight text-[#292424] dark:text-white uppercase flex items-center gap-2.5">
+              <Boxes className="text-[#FF8533] dark:text-blue-400" size={22} />
+              <span>{isEditMode ? `EDIT INWARD BILL (#${inwardNumber})` : 'CREATE INWARD BILL'}</span>
+            </h1>
+            <p className="text-xs text-gray-500 dark:text-slate-400 mt-0.5">
+              {isEditMode
+                ? 'Update incoming stock quantities and supplier details.'
+                : 'Record incoming stock and vendor purchase materials.'}
+            </p>
+          </div>
+        </div>
+
+        {/* Right Side: INWARD LIST Action Button */}
+        <div className="flex items-center gap-2.5">
+          <Button
+            variant="list"
+            icon={List}
+            onClick={() => navigate('/inward-list')}
+            className="text-xs font-semibold"
+          >
+            INWARD LIST
+          </Button>
+        </div>
+      </div>
+
+      <form onSubmit={handleSubmit} className="space-y-6">
+
+        {/* Top Grid: Supplier & Specifications (8 cols) + Inward Summary Card & Document Upload (4 cols) */}
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+
+          {/* ================= LEFT MAIN COLUMN (8 COLS) ================= */}
+          <div className="lg:col-span-8 space-y-6">
+
+            {/* A. Inward Specifications */}
+            <div className="bg-white dark:bg-slate-900 rounded-none border border-gray-200 dark:border-slate-800 p-6 shadow-sm space-y-5 transition-colors">
+              <div className="flex items-center justify-between pb-3 border-b border-gray-200 dark:border-slate-800">
+                <h2 className="text-sm font-bold text-slate-900 dark:text-white tracking-wide uppercase flex items-center gap-2">
+                  <FileText size={16} />
+                  <span>Inward Specifications</span>
+                </h2>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
+                <div>
+                  <label className="block text-xs font-semibold text-gray-700 dark:text-slate-200 mb-1.5">
+                    Inward Entry No
+                  </label>
+                  <input
+                    type="text"
+                    value={inwardNumber}
+                    readOnly
+                    className="w-full px-4 py-3 text-sm text-[#292424] dark:text-white font-mono font-bold bg-gray-100 dark:bg-slate-800 border border-gray-300 dark:border-slate-700 rounded-none cursor-not-allowed select-none"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-gray-700 dark:text-slate-200 mb-1.5">
+                    Inward Date <span className="text-red-500 font-bold">*</span>
+                  </label>
+                  <input
+                    type="date"
+                    value={inwardDate}
+                    onChange={(e) => setInwardDate(e.target.value)}
+                    required
+                    className="w-full px-4 py-3 text-sm text-[#292424] dark:text-white bg-white dark:bg-slate-950 border border-gray-300 dark:border-slate-700 rounded-none focus:outline-none focus:border-[#FF8533] dark:focus:border-blue-500 font-medium"
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* B. Supplier / Vendor Details */}
+            <div className="bg-white dark:bg-slate-900 rounded-none border border-gray-200 dark:border-slate-800 p-6 shadow-sm space-y-5 transition-colors">
+              <div className="flex items-center gap-2 pb-3 border-b border-gray-200 dark:border-slate-800">
+                <Building2 size={16} className="text-[#FF8533] dark:text-blue-400" />
+                <h2 className="text-sm font-bold text-slate-900 dark:text-white tracking-wide uppercase">
+                  Supplier / Vendor Details
+                </h2>
+              </div>
+
+              <div className="space-y-4">
+
+                {/* 1. Company Name / Supplier Name */}
+                <div>
+                  <label className="block text-xs font-semibold text-gray-700 dark:text-slate-200 mb-1.5">
+                    Supplier Name <span className="text-red-500 font-bold">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={supplierName}
+                    onChange={(e) => setSupplierName(e.target.value)}
+                    required
+                    placeholder="Supplier name"
+                    className="w-full px-4 py-3 text-sm text-[#292424] dark:text-white bg-white dark:bg-slate-950 border border-gray-300 dark:border-slate-700 rounded-none focus:outline-none focus:border-[#FF8533] dark:focus:border-blue-500 font-semibold placeholder:text-gray-400 dark:placeholder:text-slate-500"
+                  />
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  {/* 2. Phone Number */}
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-700 dark:text-slate-200 mb-1.5">
+                      Phone Number <span className="text-gray-400 text-[11px] font-normal">(10 Digits)</span>
+                    </label>
+                    <input
+                      type="tel"
+                      maxLength={10}
+                      value={supplierPhone}
+                      onChange={(e) => {
+                        const val = e.target.value.replace(/\D/g, '').slice(0, 10)
+                        setSupplierPhone(val)
+                      }}
+                      placeholder="Phone number"
+                      className="w-full px-4 py-3 text-sm text-[#292424] dark:text-white bg-white dark:bg-slate-950 border border-gray-300 dark:border-slate-700 rounded-none focus:outline-none focus:border-[#FF8533] dark:focus:border-blue-500 font-mono font-medium placeholder:text-gray-400 dark:placeholder:text-slate-500"
+                    />
+                  </div>
+
+                  {/* 3. Email ID */}
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-700 dark:text-slate-200 mb-1.5">
+                      Email <span className="text-gray-400 text-[11px] font-normal">(Optional)</span>
+                    </label>
+                    <input
+                      type="email"
+                      value={supplierEmail}
+                      onChange={(e) => setSupplierEmail(e.target.value)}
+                      placeholder="Email (optional)"
+                      className="w-full px-4 py-3 text-sm text-[#292424] dark:text-white bg-white dark:bg-slate-950 border border-gray-300 dark:border-slate-700 rounded-none focus:outline-none focus:border-[#FF8533] dark:focus:border-blue-500 font-medium placeholder:text-gray-400 dark:placeholder:text-slate-500"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  {/* 4. Location / Place of Supply */}
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-700 dark:text-slate-200 mb-1.5">
+                      Location / Place of Supply <span className="text-red-500 font-bold">*</span>
+                    </label>
+                    <SearchableSelect
+                      options={stateOptions}
+                      value={supplierLocation}
+                      onChange={(val) => {
+                        const loc = val || '33 - Tamil Nadu'
+                        setSupplierLocation(loc)
+                        const isIntra = loc.includes('33') || loc.toLowerCase().includes('tamil nadu')
+                        setItems(prev => prev.map(it => calculateInwardItem(it, isIntra)))
+                      }}
+                      placeholder="Select location"
+                    />
+                  </div>
+
+                  {/* 5. Supplier GST No (Optional) */}
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-700 dark:text-slate-200 mb-1.5">
+                      Supplier GST No <span className="text-gray-400 text-[11px] font-normal">(Optional)</span>
+                    </label>
+                    <input
+                      type="text"
+                      value={supplierGstin}
+                      onChange={(e) => setSupplierGstin(e.target.value.toUpperCase())}
+                      placeholder="GSTIN (optional)"
+                      className="w-full px-4 py-3 text-sm text-[#292424] dark:text-white uppercase bg-white dark:bg-slate-950 border border-gray-300 dark:border-slate-700 rounded-none focus:outline-none focus:border-[#FF8533] dark:focus:border-blue-500 font-mono font-medium placeholder:text-gray-400 dark:placeholder:text-slate-500"
+                    />
+                  </div>
+                </div>
+
+              </div>
+            </div>
+
+            {/* ================= INWARD MATERIALS / LINE ITEMS ================= */}
+            <InwardLineItems
+              items={items}
+              materialOptions={materialOptions}
+              duplicateSerials={duplicateSerials}
+              onMaterialSelect={handleMaterialSelect}
+              onItemChange={handleItemChange}
+              onToggleSerial={handleToggleSerial}
+              onSerialNumberChange={handleSerialNumberChange}
+              onAddItem={handleAddItem}
+              onDuplicateItem={handleDuplicateItem}
+              onRemoveItem={handleRemoveItem}
+            />
+
+          </div>
+
+          {/* ================= RIGHT COLUMN: LIVE SUMMARY & HARDCOPY UPLOAD (4 COLS) ================= */}
+          <div className="lg:col-span-4 lg:sticky lg:top-20 space-y-5">
+
+            {/* 1. Upload Hardcopy / Purchase Bill (Placed above summary) */}
+            <div className="bg-white dark:bg-slate-900 rounded-none border border-gray-200 dark:border-slate-800 p-4 shadow-sm space-y-2.5 transition-colors">
+              <div className="flex items-center justify-between pb-2 border-b border-gray-200 dark:border-slate-800">
+                <h2 className="text-sm font-bold text-slate-900 dark:text-white tracking-wide uppercase flex items-center gap-1.5">
+                  <UploadCloud size={14} />
+                  <span>Hardcopy / Bill Document</span>
+                </h2>
+                <span className="text-[10px] text-gray-400 dark:text-slate-500 font-bold uppercase tracking-wider">Optional</span>
+              </div>
+
+              {!uploadedBill ? (
+                <div
+                  onDragOver={(e) => { e.preventDefault(); setIsDragging(true) }}
+                  onDragLeave={() => setIsDragging(false)}
+                  onDrop={(e) => {
+                    e.preventDefault()
+                    setIsDragging(false)
+                    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+                      handleFileUpload(e.dataTransfer.files[0])
+                    }
+                  }}
+                  className={`border-2 border-dashed py-3 px-3 text-center transition-all cursor-pointer ${isDragging
+                      ? 'border-[#FF8533] bg-blue-50/50 dark:bg-blue-950/30'
+                      : isUploadingBill
+                        ? 'border-blue-400 bg-blue-50/30 dark:bg-slate-800/40 cursor-wait'
+                        : 'border-gray-300 dark:border-slate-700 hover:border-[#FF8533] dark:hover:border-blue-500 hover:bg-gray-50 dark:hover:bg-slate-800/50'
+                    }`}
+                  onClick={() => !isUploadingBill && document.getElementById('hardcopy-file-input')?.click()}
+                >
+                  <input
+                    id="hardcopy-file-input"
+                    type="file"
+                    accept="image/*,.pdf"
+                    className="hidden"
+                    onChange={(e) => {
+                      if (e.target.files && e.target.files[0]) {
+                        handleFileUpload(e.target.files[0])
+                      }
+                    }}
+                  />
+                  <div className="flex items-center justify-center gap-2.5">
+                    {isUploadingBill ? (
+                      <>
+                        <div className="w-5 h-5 border-2 border-[#FF8533] border-t-transparent rounded-full animate-spin shrink-0" />
+                        <p className="text-xs font-bold text-slate-900 dark:text-white">Uploading document...</p>
+                      </>
+                    ) : (
+                      <>
+                        <div className="w-7 h-7 rounded-none bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400 flex items-center justify-center shrink-0">
+                          <UploadCloud size={15} />
+                        </div>
+                        <div className="text-left">
+                          <p className="text-xs font-semibold text-gray-700 dark:text-slate-300">
+                            Upload Bill / Invoice
+                          </p>
+                          <p className="text-[10px] text-gray-400 dark:text-slate-500">
+                            Click to browse (Image or PDF)
+                          </p>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                </div>
+              ) : (
+                <div className="p-2.5 bg-gray-50 dark:bg-slate-950 border border-gray-200 dark:border-slate-800 rounded-none">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <div className="w-7 h-7 shrink-0 bg-blue-100 dark:bg-blue-950/80 text-blue-700 dark:text-blue-400 flex items-center justify-center">
+                        <FileCheck size={14} />
+                      </div>
+                      <div className="min-w-0">
+                        <p className="text-xs font-semibold text-gray-800 dark:text-slate-200 truncate" title={uploadedBill.name}>
+                          {uploadedBill.name}
+                        </p>
+                        <p className="text-[9.5px] text-gray-500 dark:text-slate-400 font-mono">
+                          {(uploadedBill.size / (1024 * 1024)).toFixed(2)} MB • Attached
+                        </p>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setUploadedBill(null)}
+                      className="p-1 text-gray-400 hover:text-red-600 transition-colors cursor-pointer"
+                      title="Remove attached document"
+                    >
+                      <X size={14} />
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* 2. Inward Summary Card (Last / Bottom) */}
+            <BillSummaryCard
+              title="Inward Summary"
+              billNumber={inwardNumber}
+              itemsBreakdown={items}
+              totalItemsCount={items.length}
+              totalQuantity={totalQuantity}
+              taxableAmount={totalTaxableAmount}
+              isIntraState={isIntraState}
+              cgstRate={defaultCgst}
+              cgstAmount={cgstAmount}
+              sgstRate={defaultSgst}
+              sgstAmount={sgstAmount}
+              igstRate={defaultIgst}
+              igstAmount={igstAmount}
+              totalTax={totalTaxAmount}
+              grandTotal={grandTotalAmount}
+              isSaving={isSaving}
+              isEditMode={isEditMode}
+              saveButtonText={isSaving ? (isEditMode ? 'Updating...' : 'Saving...') : (isEditMode ? 'Update Inward' : 'Save')}
+              onSave={canSaveInward ? handleSubmit : null}
+              onReset={canSaveInward ? handleReset : null}
+            />
+
+          </div>
+
+        </div>
+
+      </form>
+    </div>
+  )
+}

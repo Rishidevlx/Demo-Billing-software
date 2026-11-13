@@ -1,0 +1,35 @@
+import express from 'express'
+import { verifyToken } from '../middleware/authMiddleware.js'
+import {
+  getNextInvoiceNumber,
+  getNextReceiptNumber,
+  createBill,
+  updateBill,
+  getAllBills,
+  getBillById,
+  deleteBill,
+  updateBillPayment,
+  sendBillReceiptEmail,
+  allocateBillSerials
+} from '../controllers/billController.js'
+
+const router = express.Router()
+
+// Protect all bill routes with JWT verification
+router.use(verifyToken)
+
+router.get('/', getAllBills)
+router.post('/', createBill)
+router.get('/meta/next-number', getNextInvoiceNumber)
+router.get('/meta/next-receipt-number', getNextReceiptNumber)
+router.get('/:id', getBillById)
+router.put('/:id', updateBill)
+router.put('/:id/allocate-serials', allocateBillSerials)
+router.patch('/:id/payment', updateBillPayment)
+router.put('/:id/payment', updateBillPayment)
+router.post('/:id/send-receipt', sendBillReceiptEmail)
+router.delete('/:id', deleteBill)
+
+export default router
+
+

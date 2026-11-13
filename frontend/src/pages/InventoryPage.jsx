@@ -1,0 +1,1706 @@
+import React, { useState, useEffect, useMemo } from 'react'
+import { createPortal } from 'react-dom'
+import { useNavigate } from 'react-router-dom'
+import {
+  Boxes,
+  Layers,
+  AlertTriangle,
+  RefreshCw,
+  Search,
+  CheckCircle2,
+  XCircle,
+  Clock,
+  Download,
+  Filter,
+  ExternalLink,
+  ChevronRight,
+  Package,
+  PackagePlus,
+  PackageMinus,
+  PackageOpen,
+  X,
+  Loader2,
+  Edit3,
+  FileDigit,
+  Hash,
+  Copy,
+  Check,
+  FileText,
+  Printer
+} from '../components/common/icons'
+import * as XLSX from 'xlsx'
+import Swal from 'sweetalert2'
+import { API_ENDPOINTS } from '../config/api'
+import { getUserPermissions } from '../utils/access'
+import ListPageHeader from '../components/common/ListPageHeader'
+import ListKpiCard from '../components/common/ListKpiCard'
+import ListPagePagination from '../components/common/ListPagePagination'
+import { Button, ActionButton, StatusPill, SearchInput, TabNav, TabButton, Checkbox } from '../components/ui'
+import InvoiceModal from '../components/invoice/InvoiceModal'
+import ReturnVoucherTemplate from '../components/invoice/ReturnVoucherTemplate'
+
+export default function InventoryPage({ setActiveRoute }) {
+  const { can, hasAny } = getUserPermissions()
+
+  const hasTabOverview = can('tab_overview', 'View')
+  const hasTabReorder = can('tab_reorder', 'View')
+  const hasTabScrap = can('tab_scrap', 'View')
+
+  const navigate = useNavigate()
+  // Active Tab: 'overview' | 'reorder' | 'scrap'
+  const [activeTab, setActiveTab] = useState(() => {
+    if (hasTabOverview) return 'overview'
+    if (hasTabReorder) return 'reorder'
+    if (hasTabScrap) return 'scrap'
+    return 'overview'
+  })
+
+  const currentTabId = activeTab === 'overview' ? 'tab_overview' : activeTab === 'reorder' ? 'tab_reorder' : 'tab_scrap'
+
+  const canAdd = can('inventory_main', 'Add') || can('inventory', 'Add')
+  const canEdit = can(currentTabId, 'Edit') || can('inventory_main', 'Edit') || can('inventory', 'Edit') || hasAny(currentTabId, ['Edit']) || hasAny('inventory_main', ['Edit'])
+  const canDelete = can(currentTabId, 'Delete') || can('inventory_main', 'Delete') || can('inventory', 'Delete') || hasAny(currentTabId, ['Delete'])
+  const canDownload = can(currentTabId, 'Download') || can('inventory_main', 'Download') || can('inventory', 'Download') || hasAny(currentTabId, ['Download'])
+
+  // Data States
+  const [loading, setLoading] = useState(true)
+  const [inventoryData, setInventoryData] = useState([])
+  const [scrapList, setScrapList] = useState([])
+  const [scrapLoading, setScrapLoading] = useState(false)
+  const [scrapSearch, setScrapSearch] = useState('')
+  const [summaryMetrics, setSummaryMetrics] = useState({
+    total_sku_count: 0,
+    total_stock_units: 0,
+    low_stock_count: 0,
+    out_of_stock_count: 0
+  })
+  const [categories, setCategories] = useState([])
+
+  // Selection state for export & batch actions
+  const [selectedIds, setSelectedIds] = useState([])
+
+  // Filter & Search States for Overview
+  const [searchQuery, setSearchQuery] = useState('')
+  const [selectedCategory, setSelectedCategory] = useState('ALL')
+  const [selectedUnit, setSelectedUnit] = useState('ALL')
+  const [selectedStockStatus, setSelectedStockStatus] = useState('ALL') // ALL, IN_STOCK, LOW_STOCK, OUT_OF_STOCK
+
+  // Pagination States
+  const [currentPage, setCurrentPage] = useState(1)
+  const [itemsPerPage, setItemsPerPage] = useState(10)
+
+  // Quick Edit Stock & Reorder Threshold Modal State
+  const [editModalOpen, setEditModalOpen] = useState(false)
+  const [editingItem, setEditingItem] = useState(null)
+  const [editThresholdVal, setEditThresholdVal] = useState('')
+  const [isSavingEdit, setIsSavingEdit] = useState(false)
+
+  // Registered Serial Numbers Vault Modal State (Option 1)
+  const [serialsModalOpen, setSerialsModalOpen] = useState(false)
+  const [selectedMaterialForSerials, setSelectedMaterialForSerials] = useState(null)
+  const [serialsList, setSerialsList] = useState([])
+  const [serialsSummary, setSerialsSummary] = useState({ total_count: 0, available_count: 0, sold_count: 0, damaged_count: 0 })
+  const [serialsLoading, setSerialsLoading] = useState(false)
+  const [serialsFilterStatus, setSerialsFilterStatus] = useState('ALL') // 'ALL' | 'Available' | 'Sold'
+  const [serialsSearch, setSerialsSearch] = useState('')
+  const [copiedSerial, setCopiedSerial] = useState(null)
+
+  // Preview Modal States (Invoice & Return Voucher)
+  const [settings, setSettings] = useState(null)
+  const [previewInvoiceBill, setPreviewInvoiceBill] = useState(null)
+  const [selectedReturnView, setSelectedReturnView] = useState(null)
+  const [viewModalOpen, setViewModalOpen] = useState(false)
+
+  // Fetch Settings
+  const fetchSettings = async () => {
+    try {
+      const res = await fetch(API_ENDPOINTS.SETTINGS)
+      const data = await res.json()
+      if (data.success && data.settings) {
+        setSettings(data.settings)
+      }
+    } catch (e) {
+      console.warn('Failed to load settings:', e)
+    }
+  }
+
+  // Open Invoice Preview Modal
+  const handleOpenInvoicePreview = async (billNumber) => {
+    if (!billNumber || billNumber === '—' || billNumber === '-') return
+    try {
+      const res = await fetch(API_ENDPOINTS.BILL_BY_ID(encodeURIComponent(billNumber.trim())))
+      const data = await res.json()
+      if (data.success && data.bill) {
+        setPreviewInvoiceBill(data.bill)
+      } else {
+        Swal.fire({
+          icon: 'error',
+          title: 'Invoice Not Found',
+          text: `Unable to load invoice ${billNumber}.`,
+          confirmButtonColor: '#FF8533'
+        })
+      }
+    } catch (err) {
+      console.error('Error loading invoice preview:', err)
+    }
+  }
+
+  // Open Return Voucher Modal
+  const handleOpenReturnPreview = async (returnNumber, item) => {
+    if (!returnNumber || returnNumber === '—' || returnNumber === '-') return
+    try {
+      const res = await fetch(API_ENDPOINTS.RETURNS)
+      const data = await res.json()
+      if (data.success && Array.isArray(data.returns)) {
+        const found = data.returns.find(r => r.return_number === returnNumber || String(r.id) === String(returnNumber))
+        if (found) {
+          setSelectedReturnView(found)
+          setViewModalOpen(true)
+          return
+        }
+      }
+    } catch (e) {
+      console.warn('Failed to fetch from returns API:', e)
+    }
+
+    // Fallback using item from scrap list
+    setSelectedReturnView({
+      id: item?.id || 1,
+      return_number: item?.return_number || returnNumber,
+      return_date: item?.date || new Date().toISOString(),
+      bill_number: item?.bill_number || '-',
+      customer_name: item?.customer_name || 'Customer',
+      customer_phone: item?.customer_phone || '',
+      item_name: item?.material_name || 'Product',
+      serial_number: item?.serial_number && item?.serial_number !== '-' ? item.serial_number : null,
+      reason: item?.reason || 'Defective Product',
+      qc_status: 'Completed',
+      qc_decision: item?.reason === 'Damaged' ? 'REJECT' : 'REFUND',
+      qc_notes: item?.qc_notes || ''
+    })
+    setViewModalOpen(true)
+  }
+
+  // Fetch Inventory List & Summary
+  const fetchInventory = async () => {
+    setLoading(true)
+    try {
+      const res = await fetch(API_ENDPOINTS.INVENTORY)
+      const data = await res.json()
+      if (data.success) {
+        setInventoryData(data.data || data.materials || [])
+        if (data.summary || data.stats) {
+          setSummaryMetrics(data.summary || data.stats)
+        }
+      }
+    } catch (err) {
+      console.error('Failed to fetch inventory:', err)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  // Fetch Categories for Dropdown Filter
+  const fetchCategories = async () => {
+    try {
+      const res = await fetch(API_ENDPOINTS.CATEGORIES)
+      const data = await res.json()
+      if (data.success) {
+        setCategories(data.categories || data.data || [])
+      }
+    } catch (err) {
+      console.error('Failed to fetch categories:', err)
+    }
+  }
+
+  // Fetch Scrap & Defective Inventory
+  const fetchScrap = async () => {
+    try {
+      setScrapLoading(true)
+      const res = await fetch(API_ENDPOINTS.INVENTORY_SCRAP)
+      const data = await res.json()
+      if (data.success) {
+        const scrapEntries = []
+        const seenSerials = new Set()
+
+        // 1. First prioritize QC defective return records
+        for (const r of (data.qcDefectiveReturns || [])) {
+          if (r.serial_number && r.serial_number !== '-') {
+            seenSerials.add(r.serial_number.toLowerCase().trim())
+          }
+          scrapEntries.push({
+            id: `return-${r.id}`,
+            source: 'return',
+            material_id: r.material_id,
+            material_name: r.material_name,
+            material_code: r.material_code,
+            category_id: r.category_id,
+            category_name: r.category_name || 'Uncategorized',
+            serial_number: r.serial_number || '-',
+            return_number: r.return_number || '-',
+            bill_number: r.bill_number || '-',
+            customer_name: r.customer_name || 'Return Customer',
+            reason: r.reason || r.custom_reason || 'Defective Product',
+            qc_notes: r.qc_notes || '',
+            date: r.return_date || r.created_at,
+            unit: r.unit || 'Nos',
+            price: r.unit_price || 0,
+            status: r.reason || r.custom_reason || 'Defective Product'
+          })
+        }
+
+        // 2. Add any additional damaged serials from inventory_serials not already covered by returns
+        for (const s of (data.damagedSerials || [])) {
+          const sn = (s.serial_number || '').toLowerCase().trim()
+          if (!sn || !seenSerials.has(sn)) {
+            if (sn) seenSerials.add(sn)
+            scrapEntries.push({
+              id: `serial-${s.id}`,
+              source: 'serial',
+              material_id: s.material_id,
+              material_name: s.material_name,
+              material_code: s.material_code,
+              category_id: s.category_id,
+              category_name: s.category_name || 'Uncategorized',
+              serial_number: s.serial_number || '-',
+              return_number: s.return_number || '-',
+              bill_number: s.bill_number || '-',
+              customer_name: s.customer_name || 'In-House / Defective Stock',
+              reason: s.reason || 'Defective Product',
+              qc_notes: s.qc_notes || '',
+              date: s.return_date || s.updated_at || s.created_at,
+              unit: s.unit || 'Nos',
+              price: s.selling_price || 0,
+              status: s.reason || 'Defective Product'
+            })
+          }
+        }
+
+        setScrapList(scrapEntries)
+      }
+    } catch (err) {
+      console.error('Failed to load scrap inventory:', err)
+    } finally {
+      setScrapLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    fetchInventory()
+    fetchCategories()
+    fetchScrap()
+    fetchSettings()
+  }, [])
+
+  // Available unique units
+  const availableUnits = useMemo(() => {
+    return Array.from(new Set(inventoryData.map(i => i.unit).filter(Boolean)))
+  }, [inventoryData])
+
+  // Filtered Inventory for Overview Tab
+  const filteredInventory = useMemo(() => {
+    return inventoryData.filter(item => {
+      // Search
+      const q = searchQuery.toLowerCase().trim()
+      const matchSearch =
+        !q ||
+        item.name?.toLowerCase().includes(q) ||
+        item.brand?.toLowerCase().includes(q) ||
+        item.hsn_code?.toLowerCase().includes(q) ||
+        item.category_name?.toLowerCase().includes(q)
+
+      // Category
+      const matchCat =
+        selectedCategory === 'ALL' ||
+        String(item.category_id) === String(selectedCategory)
+
+      // Unit
+      const matchUnit =
+        selectedUnit === 'ALL' ||
+        item.unit === selectedUnit
+
+      // Status
+      let matchStatus = true
+      const stock = parseInt(item.current_stock || 0, 10)
+      const reorder = parseInt(item.reorder_level || 0, 10)
+      if (selectedStockStatus === 'OUT_OF_STOCK') {
+        matchStatus = stock <= 0
+      } else if (selectedStockStatus === 'LOW_STOCK') {
+        matchStatus = stock > 0 && stock <= reorder
+      } else if (selectedStockStatus === 'IN_STOCK') {
+        matchStatus = stock > reorder
+      }
+
+      return matchSearch && matchCat && matchUnit && matchStatus
+    })
+  }, [inventoryData, searchQuery, selectedCategory, selectedUnit, selectedStockStatus])
+
+  // Low Stock Items for Reorder Tab
+  const lowStockItems = useMemo(() => {
+    return inventoryData.filter(item => {
+      const stock = parseInt(item.current_stock || 0, 10)
+      const reorder = parseInt(item.reorder_level || 0, 10)
+      return stock <= reorder
+    })
+  }, [inventoryData])
+
+  // Filtered Scrap / Defective Items
+  const filteredScrap = useMemo(() => {
+    return scrapList.filter(item => {
+      const q = scrapSearch.toLowerCase().trim()
+      const matchSearch =
+        !q ||
+        item.material_name?.toLowerCase().includes(q) ||
+        item.serial_number?.toLowerCase().includes(q) ||
+        item.return_number?.toLowerCase().includes(q) ||
+        item.bill_number?.toLowerCase().includes(q) ||
+        item.customer_name?.toLowerCase().includes(q) ||
+        item.reason?.toLowerCase().includes(q) ||
+        item.hsn_code?.toLowerCase().includes(q)
+
+      const matchCat =
+        selectedCategory === 'ALL' ||
+        String(item.category_id) === String(selectedCategory) ||
+        String(item.category_name) === String(selectedCategory)
+
+      return matchSearch && matchCat
+    })
+  }, [scrapList, scrapSearch, selectedCategory])
+
+  // Paginated Items
+  const currentTabList = activeTab === 'reorder' ? lowStockItems : (activeTab === 'scrap' ? filteredScrap : filteredInventory)
+  const totalItems = currentTabList.length
+  const totalPages = Math.max(1, Math.ceil(totalItems / itemsPerPage))
+  const startIndex = (currentPage - 1) * itemsPerPage
+  const endIndex = Math.min(startIndex + itemsPerPage, totalItems)
+  const paginatedInventory = currentTabList.slice(startIndex, endIndex)
+
+  // Selection Logic
+  const isAllPaginatedSelected =
+    paginatedInventory.length > 0 && paginatedInventory.every((item) => selectedIds.includes(item.id))
+
+  const handleToggleSelectAll = () => {
+    if (isAllPaginatedSelected) {
+      const pageIds = paginatedInventory.map((item) => item.id)
+      setSelectedIds((prev) => prev.filter((id) => !pageIds.includes(id)))
+    } else {
+      const pageIds = paginatedInventory.map((item) => item.id)
+      setSelectedIds((prev) => Array.from(new Set([...prev, ...pageIds])))
+    }
+  }
+
+  const handleToggleSelectRow = (id) => {
+    setSelectedIds((prev) =>
+      prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id]
+    )
+  }
+
+  // Open Edit Stock & Reorder Modal
+  const handleOpenEditModal = (item) => {
+    setEditingItem(item)
+    setEditThresholdVal(item.reorder_level !== undefined ? String(item.reorder_level) : '0')
+    setEditModalOpen(true)
+  }
+
+  // Save Stock Reorder Level
+  const handleSaveEdit = async (e) => {
+    e.preventDefault()
+    if (editThresholdVal === '' || parseInt(editThresholdVal, 10) < 0) {
+      Swal.fire({
+        icon: 'warning',
+        title: 'Invalid Threshold',
+        text: 'Please enter 0 or higher for reorder threshold.',
+        confirmButtonColor: '#FF8533'
+      })
+      return
+    }
+
+    setIsSavingEdit(true)
+    try {
+      const res = await fetch(API_ENDPOINTS.INVENTORY_UPDATE_STOCK_THRESHOLD, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          material_id: editingItem.id,
+          reorder_level: parseInt(editThresholdVal, 10)
+        })
+      })
+
+      const data = await res.json()
+      if (data.success) {
+        Swal.fire({
+          icon: 'success',
+          title: 'Threshold Updated',
+          text: `"${editingItem.name}" reorder threshold updated to ${editThresholdVal} ${editingItem.unit || 'units'}.`,
+          confirmButtonColor: '#FF8533',
+          timer: 1800,
+          showConfirmButton: false
+        })
+        setEditModalOpen(false)
+        fetchInventory()
+      } else {
+        Swal.fire({
+          icon: 'error',
+          title: 'Error',
+          text: data.message || 'Failed to update reorder threshold.',
+          confirmButtonColor: '#FF8533'
+        })
+      }
+    } catch (err) {
+      console.error('Error saving reorder threshold:', err)
+    } finally {
+      setIsSavingEdit(false)
+    }
+  }
+
+  // Open Registered Serial Numbers Vault Modal
+  const handleOpenSerialsModal = async (item) => {
+    setSelectedMaterialForSerials(item)
+    setSerialsModalOpen(true)
+    setSerialsLoading(true)
+    setSerialsSearch('')
+    setSerialsFilterStatus('ALL')
+    try {
+      const res = await fetch(API_ENDPOINTS.INVENTORY_MATERIAL_SERIALS(item.id))
+      const data = await res.json()
+      if (data.success) {
+        setSerialsList(data.serials || [])
+        setSerialsSummary(data.summary || { total_count: 0, available_count: 0, sold_count: 0, damaged_count: 0 })
+      }
+    } catch (err) {
+      console.error('Failed to fetch serials for material:', err)
+    } finally {
+      setSerialsLoading(false)
+    }
+  }
+
+  // Copy single serial number to clipboard
+  const handleCopySingleSerial = (sn) => {
+    if (!sn) return
+    navigator.clipboard.writeText(sn)
+    setCopiedSerial(sn)
+    setTimeout(() => {
+      setCopiedSerial((prev) => (prev === sn ? null : prev))
+    }, 2000)
+    Swal.mixin({
+      toast: true,
+      position: 'top-end',
+      showConfirmButton: false,
+      timer: 1800,
+      timerProgressBar: true
+    }).fire({
+      icon: 'success',
+      title: `Copied: ${sn}`
+    })
+  }
+
+  // Copy all available serial numbers
+  const handleCopyAllAvailable = () => {
+    const available = serialsList.filter(s => s.status === 'Available').map(s => s.serial_number)
+    if (available.length === 0) {
+      Swal.mixin({
+        toast: true,
+        position: 'top-end',
+        showConfirmButton: false,
+        timer: 2000
+      }).fire({
+        icon: 'info',
+        title: 'No available serial numbers to copy.'
+      })
+      return
+    }
+    const textToCopy = available.join(', ')
+    navigator.clipboard.writeText(textToCopy)
+    Swal.mixin({
+      toast: true,
+      position: 'top-end',
+      showConfirmButton: false,
+      timer: 2500,
+      timerProgressBar: true
+    }).fire({
+      icon: 'success',
+      title: `Copied ${available.length} available serial numbers!`
+    })
+  }
+
+  // Filtered serials for modal
+  const filteredModalSerials = useMemo(() => {
+    return serialsList.filter(s => {
+      const q = serialsSearch.toLowerCase().trim()
+      const matchSearch = !q || (s.serial_number && s.serial_number.toLowerCase().includes(q))
+      const matchStatus = serialsFilterStatus === 'ALL' || s.status === serialsFilterStatus
+      return matchSearch && matchStatus
+    })
+  }, [serialsList, serialsSearch, serialsFilterStatus])
+
+  // Export to Excel Handler (Identical to Inward / Outward List)
+  const handleExportExcel = () => {
+    const targetItems =
+      selectedIds.length > 0
+        ? currentTabList.filter((item) => selectedIds.includes(item.id))
+        : currentTabList
+
+    if (targetItems.length === 0) {
+      Swal.fire({
+        icon: 'info',
+        title: 'No Stock Items to Export',
+        text: 'No inventory records match the current selection or filter.',
+        confirmButtonColor: '#FF8533'
+      })
+      return
+    }
+
+    if (activeTab === 'scrap') {
+      const excelRows = targetItems.map((item, idx) => ({
+        'S.No': idx + 1,
+        'Recorded Date': item.date ? String(item.date).split('T')[0] : '-',
+        'Defective Material': item.material_name || '',
+        'Defective Serial Number': item.serial_number || '-',
+        'Return Bill Number': item.return_number || '-',
+        'Original Invoice Number': item.bill_number || '-',
+        'Customer Name': item.customer_name || '-',
+        'QC Defect Reason / Notes': item.qc_notes || item.reason || '-',
+        'Stock Status': 'Damaged / Scrap'
+      }))
+
+      const worksheet = XLSX.utils.json_to_sheet(excelRows)
+      const workbook = XLSX.utils.book_new()
+      XLSX.utils.book_append_sheet(workbook, worksheet, 'Scrap_Defective_Stock')
+      const dateStr = new Date().toISOString().split('T')[0]
+      XLSX.writeFile(workbook, `Simcha_Scrap_Defective_${dateStr}.xlsx`)
+
+      Swal.fire({
+        icon: 'success',
+        title: 'Excel Export Ready',
+        text: `Successfully exported ${excelRows.length} scrap/defective item(s) to Excel.`,
+        timer: 2000,
+        showConfirmButton: false
+      })
+      return
+    }
+
+    const excelRows = targetItems.map((item, idx) => {
+      const stock = parseInt(item.current_stock || 0, 10)
+      const reorder = parseInt(item.reorder_level || 0, 10)
+      let status = 'In Stock'
+      if (stock <= 0) status = 'Out of Stock'
+      else if (stock <= reorder) status = 'Low Stock'
+
+      return {
+        'S.No': idx + 1,
+        'Material Name': item.name || '',
+        'Category': item.category_name || 'Uncategorized',
+        'Brand': item.brand || '—',
+        'HSN / SAC Code': item.hsn_code || '-',
+        'Available Stock': stock,
+        'Unit': item.unit || 'Nos',
+        'Reorder Threshold': reorder,
+        'Unit Selling Price (₹)': parseFloat(item.selling_price || 0).toFixed(2),
+        'Stock Status': status
+      }
+    })
+
+    const worksheet = XLSX.utils.json_to_sheet(excelRows)
+    const workbook = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'Stock_Inventory')
+
+    worksheet['!cols'] = [
+      { wch: 8 },  // S.No
+      { wch: 30 }, // Material Name
+      { wch: 20 }, // Category
+      { wch: 18 }, // Brand
+      { wch: 15 }, // HSN Code
+      { wch: 15 }, // Available Stock
+      { wch: 10 }, // Unit
+      { wch: 18 }, // Reorder Threshold
+      { wch: 22 }, // Unit Selling Price
+      { wch: 15 }  // Stock Status
+    ]
+
+    const dateStr = new Date().toISOString().split('T')[0]
+    XLSX.writeFile(workbook, `Simcha_Stock_Inventory_${dateStr}.xlsx`)
+
+    Swal.fire({
+      icon: 'success',
+      title: 'Excel Export Ready',
+      text: `Successfully exported ${excelRows.length} item(s) to Excel.`,
+      timer: 2000,
+      showConfirmButton: false
+    })
+  }
+
+  return (
+    <div className="space-y-6 max-w-[1600px] mx-auto pb-12 font-['Poppins',sans-serif]">
+      {/* 1. Header with Global Actions (Green Export to Excel Button) */}
+      <ListPageHeader
+        icon={PackageOpen}
+        title="Stock & Inventory Control"
+        subtitle="Real-time multi-channel inventory tracking, automated inward/outward ledger, and reorder planning."
+        actions={
+          <div className="flex items-center gap-2.5 flex-wrap">
+            {/* Green Export Excel Button matching Inward & Outward List */}
+            {canDownload && (
+              <Button
+                variant="export"
+                icon={Download}
+                onClick={handleExportExcel}
+                title={selectedIds.length > 0 ? `Export ${selectedIds.length} Selected Item(s)` : 'Export All Filtered Items'}
+              >
+                {selectedIds.length > 0 ? `EXPORT SELECTED (${selectedIds.length})` : 'EXPORT TO EXCEL'}
+              </Button>
+            )}
+
+            <Button
+              variant="primary"
+              icon={PackagePlus}
+              onClick={() => {
+                if (setActiveRoute) setActiveRoute('inward')
+                navigate('/inward')
+              }}
+            >
+              New Inward
+            </Button>
+          </div>
+        }
+      />
+
+      {/* 2. Top Summary KPI Metrics Cards (Valuation removed) */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <ListKpiCard
+          label="Total Active Materials"
+          value={inventoryData.length}
+          icon={PackageOpen}
+          variant="blueValue"
+        />
+        <ListKpiCard
+          label="In-Stock Units"
+          value={parseInt(summaryMetrics.total_stock_units || summaryMetrics.totalUnits || 0, 10).toLocaleString('en-IN')}
+          icon={Layers}
+          variant="emerald"
+        />
+        <ListKpiCard
+          label="Low Stock Alerts"
+          value={parseInt(summaryMetrics.low_stock_count || summaryMetrics.lowStockCount || 0, 10)}
+          icon={AlertTriangle}
+          variant="amber"
+        />
+        <ListKpiCard
+          label="Out of Stock SKUs"
+          value={parseInt(summaryMetrics.out_of_stock_count || summaryMetrics.outOfStockCount || 0, 10)}
+          icon={XCircle}
+          variant="rose"
+        />
+      </div>
+
+      {/* 3. Tab Navigation Bar (Stock Overview, Low Stock / Reorder, Scrap / Defective) */}
+      <TabNav>
+        {hasTabOverview && (
+          <TabButton
+            active={activeTab === 'overview'}
+            variant="blue"
+            icon={Boxes}
+            label={`Stock Overview (${inventoryData.length})`}
+            onClick={() => {
+              setActiveTab('overview')
+              setCurrentPage(1)
+              setSelectedIds([])
+            }}
+          />
+        )}
+
+        {hasTabReorder && (
+          <TabButton
+            active={activeTab === 'reorder'}
+            variant="amber"
+            icon={AlertTriangle}
+            label={`Low Stock / Reorder (${lowStockItems.length})`}
+            onClick={() => {
+              setActiveTab('reorder')
+              setCurrentPage(1)
+              setSelectedIds([])
+            }}
+          />
+        )}
+
+        {hasTabScrap && (
+          <TabButton
+            active={activeTab === 'scrap'}
+            variant="rose"
+            icon={PackageMinus}
+            label={`Scrap / Defective (${scrapList.length})`}
+            onClick={() => {
+              setActiveTab('scrap')
+              setCurrentPage(1)
+              setSelectedIds([])
+            }}
+          />
+        )}
+      </TabNav>
+
+      {/* 4. Tab 1 & Tab 2: Material Stock Table */}
+      {(activeTab === 'overview' || activeTab === 'reorder') && (
+        <div className="bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-none shadow-xs transition-colors">
+          {/* Filter Bar */}
+          {activeTab === 'overview' && (
+            <div className="p-4 border-b border-gray-200 dark:border-slate-800 bg-[#fbfcfd] dark:bg-slate-950/40 flex flex-col md:flex-row md:items-center justify-between gap-4">
+              {/* Search Bar with Fixed Width */}
+              <div className="w-full md:w-80">
+                <SearchInput
+                  placeholder="Search item, HSN code..."
+                  value={searchQuery}
+                  onChange={(e) => {
+                    setSearchQuery(e.target.value)
+                    setCurrentPage(1)
+                  }}
+                  onClear={() => {
+                    setSearchQuery('')
+                    setCurrentPage(1)
+                  }}
+                />
+              </div>
+
+              {/* Category, Unit, Status Filters & Reload */}
+              <div className="flex items-center gap-3 flex-wrap">
+                <div className="flex items-center gap-1.5">
+                  <span className="text-[11px] font-bold text-gray-500 dark:text-slate-400 uppercase tracking-wider">Category:</span>
+                  <select
+                    value={selectedCategory}
+                    onChange={(e) => {
+                      setSelectedCategory(e.target.value)
+                      setCurrentPage(1)
+                    }}
+                    className="px-3 py-1.5 text-xs text-gray-800 dark:text-slate-200 bg-white dark:bg-slate-900 border border-gray-300 dark:border-slate-700 rounded-none focus:outline-none focus:border-[#FF8533] dark:focus:border-blue-500 cursor-pointer"
+                  >
+                    <option value="ALL">All Categories</option>
+                    {categories.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="flex items-center gap-1.5">
+                  <span className="text-[11px] font-bold text-gray-500 dark:text-slate-400 uppercase tracking-wider">Unit:</span>
+                  <select
+                    value={selectedUnit}
+                    onChange={(e) => {
+                      setSelectedUnit(e.target.value)
+                      setCurrentPage(1)
+                    }}
+                    className="px-3 py-1.5 text-xs text-gray-800 dark:text-slate-200 bg-white dark:bg-slate-900 border border-gray-300 dark:border-slate-700 rounded-none focus:outline-none focus:border-[#FF8533] dark:focus:border-blue-500 cursor-pointer"
+                  >
+                    <option value="ALL">All Units</option>
+                    {availableUnits.map((u) => (
+                      <option key={u} value={u}>
+                        {u}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="flex items-center gap-1.5">
+                  <span className="text-[11px] font-bold text-gray-500 dark:text-slate-400 uppercase tracking-wider">Status:</span>
+                  <select
+                    value={selectedStockStatus}
+                    onChange={(e) => {
+                      setSelectedStockStatus(e.target.value)
+                      setCurrentPage(1)
+                    }}
+                    className="px-3 py-1.5 text-xs text-gray-800 dark:text-slate-200 bg-white dark:bg-slate-900 border border-gray-300 dark:border-slate-700 rounded-none focus:outline-none focus:border-[#FF8533] dark:focus:border-blue-500 cursor-pointer"
+                  >
+                    <option value="ALL">All Stock Levels</option>
+                    <option value="IN_STOCK">In Stock (Normal)</option>
+                    <option value="LOW_STOCK">Low Stock (Alert)</option>
+                    <option value="OUT_OF_STOCK">Out of Stock (0)</option>
+                  </select>
+                </div>
+
+                {/* Reload Button next to filters */}
+                <button
+                  onClick={fetchInventory}
+                  className="p-1.5 text-gray-600 dark:text-slate-300 bg-white dark:bg-slate-900 border border-gray-300 dark:border-slate-700 rounded-none hover:bg-gray-50 dark:hover:bg-slate-800 transition-colors shadow-xs cursor-pointer ml-1"
+                  title="Reload Inventory Data"
+                >
+                  <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Table Container */}
+          <div className="overflow-x-auto">
+            <table className="w-full text-left border-collapse font-['Poppins',sans-serif]">
+              <thead>
+                <tr className="bg-[#f8fafc] dark:bg-slate-800/80 border-b border-gray-200 dark:border-slate-800 text-[11px] font-bold text-gray-600 dark:text-slate-300 uppercase tracking-wider">
+                  {/* Select All Checkbox */}
+                  <th className="py-3 px-3.5 w-10 text-center">
+                    <Checkbox
+                      checked={isAllPaginatedSelected}
+                      indeterminate={selectedIds.length > 0 && !isAllPaginatedSelected}
+                      onChange={handleToggleSelectAll}
+                      disabled={loading || paginatedInventory.length === 0}
+                    />
+                  </th>
+                  <th className="py-3 px-3 w-12 text-center">ID</th>
+                  <th className="py-3 px-4">Material Name</th>
+                  <th className="py-3 px-4">Category</th>
+                  <th className="py-3 px-4">Brand</th>
+                  <th className="py-3 px-4 uppercase font-bold text-[11px] tracking-wider">HSN Code</th>
+                  <th className="py-3 px-4 text-right">Available Stock</th>
+                  <th className="py-3 px-4 text-center">Unit</th>
+                  <th className="py-3 px-4 text-center">Reorder Threshold</th>
+                  <th className="py-3 px-4 text-right">Unit Price</th>
+                  <th className="py-3 px-4 text-center">Stock Health</th>
+                  <th className="py-3 px-4 text-center">Quick Actions</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-200 dark:divide-slate-800 text-xs text-gray-700 dark:text-slate-300">
+                {loading ? (
+                  <tr>
+                    <td colSpan={12} className="py-12 text-center text-gray-400 dark:text-slate-500">
+                      <div className="flex flex-col items-center justify-center gap-2">
+                        <Loader2 size={24} className="animate-spin text-[#FF8533] dark:text-blue-400" />
+                        <span className="text-xs font-semibold">Loading Live Inventory...</span>
+                      </div>
+                    </td>
+                  </tr>
+                ) : paginatedInventory.length === 0 ? (
+                  <tr>
+                    <td colSpan={12} className="py-12 text-center text-gray-400 dark:text-slate-500">
+                      <div className="flex flex-col items-center justify-center gap-2">
+                        <Package size={28} className="text-gray-300 dark:text-slate-600" />
+                        <span className="text-xs font-semibold">
+                          {activeTab === 'reorder'
+                            ? 'All stock levels are healthy! No items below reorder threshold.'
+                            : 'No materials matched your search criteria.'}
+                        </span>
+                      </div>
+                    </td>
+                  </tr>
+                ) : (
+                  paginatedInventory.map((item, idx) => {
+                    const rowNumber = startIndex + idx + 1
+                    const isSelected = selectedIds.includes(item.id)
+                    const stock = parseInt(item.current_stock || 0, 10)
+                    const reorder = parseInt(item.reorder_level || 0, 10)
+                    const isOutOfStock = stock <= 0
+                    const isLowStock = stock > 0 && stock <= reorder
+                    const price = parseFloat(item.selling_price || 0)
+
+                    return (
+                      <tr
+                        key={item.id}
+                        className={`transition-colors ${
+                          isSelected
+                            ? 'bg-blue-50/80 dark:bg-blue-950/40 border-l-2 border-[#FF8533] dark:border-blue-500'
+                            : 'hover:bg-blue-50/40 dark:hover:bg-slate-800/40'
+                        }`}
+                      >
+                        {/* Checkbox */}
+                        <td className="py-3 px-3.5 text-center">
+                          <Checkbox
+                            checked={isSelected}
+                            onChange={() => handleToggleSelectRow(item.id)}
+                          />
+                        </td>
+
+                        <td className="py-3 px-3 text-center font-mono text-gray-400 dark:text-slate-500">
+                          {rowNumber}
+                        </td>
+
+                        {/* Material Name */}
+                        <td className="py-3 px-4">
+                          <span className="font-bold text-[#292424] dark:text-white">
+                            {item.name}
+                          </span>
+                        </td>
+
+                        {/* Category */}
+                        <td className="py-3 px-4">
+                          <span className="text-xs font-semibold text-gray-800 dark:text-slate-200">
+                            {item.category_name || 'Uncategorized'}
+                          </span>
+                        </td>
+
+                        {/* Brand */}
+                        <td className="py-3 px-4">
+                          {item.brand ? (
+                            <span className="font-medium text-gray-800 dark:text-slate-200 text-xs">
+                              {item.brand}
+                            </span>
+                          ) : (
+                            <span className="text-gray-400 dark:text-slate-500 text-xs font-mono">—</span>
+                          )}
+                        </td>
+
+                        {/* HSN Code */}
+                        <td className="py-3 px-4 font-mono font-semibold text-gray-700 dark:text-slate-300">
+                          {item.hsn_code || '—'}
+                        </td>
+
+                        {/* Available Stock */}
+                        <td className="py-3 px-4 text-right">
+                          <span
+                            className={`text-sm font-black font-mono ${
+                              isOutOfStock
+                                ? 'text-red-600 dark:text-red-400'
+                                : isLowStock
+                                ? 'text-amber-600 dark:text-amber-400'
+                                : 'text-emerald-600 dark:text-emerald-400'
+                            }`}
+                          >
+                            {stock}
+                          </span>
+                        </td>
+
+                        {/* Unit (Dedicated Column) */}
+                        <td className="py-3 px-4 text-center">
+                          <span className="px-2 py-0.5 rounded-none bg-gray-100 dark:bg-slate-800 text-gray-700 dark:text-slate-300 border border-gray-200 dark:border-slate-700 text-[11px] font-semibold uppercase">
+                            {item.unit || 'Nos'}
+                          </span>
+                        </td>
+
+                        {/* Reorder Threshold */}
+                        <td className="py-3 px-4 text-center">
+                          {canEdit ? (
+                            <button
+                              onClick={() => handleOpenEditModal(item)}
+                              className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-mono font-bold text-gray-700 dark:text-slate-300 bg-gray-100 dark:bg-slate-800 hover:bg-blue-100 dark:hover:bg-blue-950 border border-gray-200 dark:border-slate-700 rounded-none transition-colors cursor-pointer group"
+                              title="Click to edit stock or alert threshold"
+                            >
+                              <span>{reorder}</span>
+                              <Edit3 size={11} className="text-gray-400 group-hover:text-[#FF8533] dark:group-hover:text-blue-400" />
+                            </button>
+                          ) : (
+                            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-mono font-bold text-gray-700 dark:text-slate-300 bg-gray-100 dark:bg-slate-800 border border-gray-200 dark:border-slate-700 rounded-none">
+                              {reorder}
+                            </span>
+                          )}
+                        </td>
+
+                        {/* Unit Price */}
+                        <td className="py-3 px-4 text-right font-mono font-medium text-gray-700 dark:text-slate-300">
+                          ₹{price.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </td>
+
+                        {/* Stock Health */}
+                        <td className="py-3 px-4 text-center">
+                          <StatusPill
+                            status={isOutOfStock ? 'Out of Stock' : isLowStock ? 'Low Stock' : 'Healthy'}
+                            size="sm"
+                          />
+                        </td>
+
+                        {/* Quick Actions */}
+                        <td className="py-3 px-4 text-center">
+                          <div className="flex items-center justify-center gap-1.5">
+                            {/* Inward Action (PackagePlus) */}
+                            <button
+                              onClick={() => navigate('/inward')}
+                              className="p-1.5 text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/50 hover:bg-emerald-600 hover:text-white dark:hover:bg-emerald-600 dark:hover:text-white border border-emerald-200 dark:border-emerald-800 rounded-none transition-all cursor-pointer shadow-2xs"
+                              title="Create Inward (Purchase Stock)"
+                            >
+                              <PackagePlus size={15} />
+                            </button>
+
+                            {/* Outward Action (PackageMinus) */}
+                            <button
+                              onClick={() => navigate('/outward')}
+                              className="p-1.5 text-blue-700 dark:text-blue-400 bg-blue-50 dark:bg-blue-950/50 hover:bg-[#FF8533] hover:text-white dark:hover:bg-blue-600 dark:hover:text-white border border-blue-200 dark:border-blue-800 rounded-none transition-all cursor-pointer shadow-2xs"
+                              title="Create Outward (Sales Invoice)"
+                            >
+                              <PackageMinus size={15} />
+                            </button>
+
+                            {/* View Serial Vault (FileDigit) */}
+                            <button
+                              onClick={() => handleOpenSerialsModal(item)}
+                              className={`p-1.5 rounded-none border transition-all cursor-pointer shadow-2xs ${
+                                item.serial_tracking
+                                  ? 'text-blue-700 dark:text-blue-300 bg-blue-50 dark:bg-blue-950/60 hover:bg-[#FF8533] hover:text-white dark:hover:bg-blue-600 dark:hover:text-white border-blue-300 dark:border-blue-700'
+                                  : 'text-gray-400 dark:text-slate-500 bg-gray-50 dark:bg-slate-800/50 hover:text-gray-700 dark:hover:text-slate-300 border-gray-200 dark:border-slate-700'
+                              }`}
+                              title={item.serial_tracking ? "View Registered Serial Numbers Vault" : "View Serial Tracking Records"}
+                            >
+                              <FileDigit size={15} />
+                            </button>
+
+                            {/* Quick Edit Stock & Threshold Action (Edit3) */}
+                            {canEdit && (
+                              <button
+                                onClick={() => handleOpenEditModal(item)}
+                                className="p-1.5 text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/50 hover:bg-amber-500 hover:text-white dark:hover:bg-amber-500 dark:hover:text-white border border-amber-200 dark:border-amber-800 rounded-none transition-all cursor-pointer shadow-2xs"
+                                title="Quick Edit Stock & Threshold"
+                              >
+                                <Edit3 size={15} />
+                              </button>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    )
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
+
+          {/* Pagination */}
+          <ListPagePagination
+            currentPage={currentPage}
+            totalPages={totalPages}
+            totalItems={totalItems}
+            itemsPerPage={itemsPerPage}
+            onPageChange={setCurrentPage}
+            onItemsPerPageChange={(newSize) => {
+              setItemsPerPage(newSize)
+              setCurrentPage(1)
+            }}
+          />
+        </div>
+      )}
+
+      {/* 5. Tab 3: Scrap / Defective Materials & Serials Vault Table */}
+      {activeTab === 'scrap' && (
+        <div className="bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-none shadow-xs transition-colors">
+          {/* Filter Bar */}
+          <div className="p-4 border-b border-gray-200 dark:border-slate-800 bg-[#fbfcfd] dark:bg-slate-950/40 flex flex-col md:flex-row md:items-center justify-between gap-4">
+            {/* Search Bar */}
+            <div className="w-full md:w-80">
+              <SearchInput
+                placeholder="Search Defective Serial, Material, Return ID, Reason..."
+                value={scrapSearch}
+                onChange={(e) => {
+                  setScrapSearch(e.target.value)
+                  setCurrentPage(1)
+                }}
+                onClear={() => {
+                  setScrapSearch('')
+                  setCurrentPage(1)
+                }}
+              />
+            </div>
+
+            {/* Category Filter & Reload */}
+            <div className="flex items-center gap-3 flex-wrap">
+              <div className="flex items-center gap-1.5">
+                <span className="text-[11px] font-bold text-gray-500 dark:text-slate-400 uppercase tracking-wider">Category:</span>
+                <select
+                  value={selectedCategory}
+                  onChange={(e) => {
+                    setSelectedCategory(e.target.value)
+                    setCurrentPage(1)
+                  }}
+                  className="px-3 py-1.5 text-xs text-gray-800 dark:text-slate-200 bg-white dark:bg-slate-900 border border-gray-300 dark:border-slate-700 rounded-none focus:outline-none focus:border-[#FF8533] dark:focus:border-blue-500 cursor-pointer"
+                >
+                  <option value="ALL">All Categories</option>
+                  {categories.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Reload Button */}
+              <button
+                onClick={fetchScrap}
+                className="p-1.5 text-gray-600 dark:text-slate-300 bg-white dark:bg-slate-900 border border-gray-300 dark:border-slate-700 rounded-none hover:bg-gray-50 dark:hover:bg-slate-800 transition-colors shadow-xs cursor-pointer ml-1"
+                title="Reload Scrap Data"
+              >
+                <RefreshCw size={14} className={scrapLoading ? 'animate-spin' : ''} />
+              </button>
+            </div>
+          </div>
+
+          {/* Table Container */}
+          <div className="overflow-x-auto">
+            <table className="w-full text-left border-collapse text-xs">
+              <thead>
+                <tr className="border-b border-gray-200 dark:border-slate-800 bg-[#f8fafc] dark:bg-slate-950 text-[11px] font-bold text-gray-600 dark:text-slate-400 uppercase tracking-wider">
+                  <th className="py-3 px-3 text-center w-10 whitespace-nowrap">ID</th>
+                  <th className="py-3 px-4 text-center whitespace-nowrap">Date</th>
+                  <th className="py-3 px-4 whitespace-nowrap">Product Name</th>
+                  <th className="py-3 px-4 whitespace-nowrap">Serial Number</th>
+                  <th className="py-3 px-4 whitespace-nowrap">Return Bill ID</th>
+                  <th className="py-3 px-4 whitespace-nowrap">Original Inv ID</th>
+                  <th className="py-3 px-4 whitespace-nowrap">Customer</th>
+                  <th className="py-3 px-4 min-w-[220px]">QC Findings / Notes</th>
+                  <th className="py-3 px-4 text-center whitespace-nowrap">Return Reason</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100 dark:divide-slate-800">
+                {scrapLoading ? (
+                  <tr>
+                    <td colSpan="9" className="py-12 text-center text-gray-400 dark:text-slate-500">
+                      <Loader2 className="animate-spin inline-block mr-2" size={18} />
+                      Loading scrap &amp; defective products...
+                    </td>
+                  </tr>
+                ) : paginatedInventory.length === 0 ? (
+                  <tr>
+                    <td colSpan="9" className="py-12 text-center text-gray-400 dark:text-slate-500">
+                      <div className="flex flex-col items-center justify-center gap-1.5 py-4">
+                        <AlertTriangle className="text-rose-400" size={32} />
+                        <p className="font-semibold text-xs text-gray-600 dark:text-slate-400">No Scrap / Defective Materials Found</p>
+                        <p className="text-[11px] text-gray-400 dark:text-slate-500">Items tagged as defective or QC Failed will appear here automatically.</p>
+                      </div>
+                    </td>
+                  </tr>
+                ) : (
+                  paginatedInventory.map((item, index) => {
+                    const sNo = (currentPage - 1) * itemsPerPage + index + 1
+                    return (
+                      <tr
+                        key={item.id || index}
+                        className="hover:bg-rose-50/20 dark:hover:bg-rose-950/10 transition-colors"
+                      >
+                        {/* 1. S.No */}
+                        <td className="py-3 px-3 text-center font-mono font-medium text-gray-500 dark:text-slate-400 whitespace-nowrap">
+                          {sNo}
+                        </td>
+
+                        {/* 2. Date */}
+                        <td className="py-3 px-4 text-center font-mono text-[11px] font-semibold text-gray-700 dark:text-slate-300 whitespace-nowrap">
+                          {item.date ? String(item.date).split('T')[0] : '—'}
+                        </td>
+
+                        {/* 3. Product Name */}
+                        <td className="py-3 px-4 whitespace-nowrap">
+                          <span className="font-bold text-gray-900 dark:text-white text-xs">
+                            {item.material_name}
+                          </span>
+                        </td>
+
+                        {/* 4. Serial Number */}
+                        <td className="py-3 px-4 font-mono whitespace-nowrap">
+                          {item.serial_number && item.serial_number !== '-' ? (
+                            <div
+                              onClick={() => {
+                                navigator.clipboard.writeText(item.serial_number)
+                                setCopiedSerial(item.serial_number)
+                                setTimeout(() => setCopiedSerial(null), 1500)
+                              }}
+                              className="inline-flex items-center gap-1.5 font-mono text-xs font-semibold text-gray-800 dark:text-slate-200 hover:text-blue-600 dark:hover:text-blue-400 cursor-pointer group transition-colors"
+                              title="Click to copy serial number"
+                            >
+                              <span className="font-bold">{item.serial_number}</span>
+                              {copiedSerial === item.serial_number ? (
+                                <span className="inline-flex items-center gap-0.5 text-[10px] text-emerald-600 font-sans font-bold">
+                                  <Check size={12} /> Copied!
+                                </span>
+                              ) : (
+                                <Copy size={12} className="text-gray-400 opacity-0 group-hover:opacity-100 transition-opacity" />
+                              )}
+                            </div>
+                          ) : (
+                            <span className="text-gray-400 text-xs font-mono">—</span>
+                          )}
+                        </td>
+
+                        {/* 5. Return Bill # */}
+                        <td className="py-3 px-4 font-mono text-xs whitespace-nowrap">
+                          {item.return_number && item.return_number !== '-' ? (
+                            <button
+                              type="button"
+                              onClick={() => handleOpenReturnPreview(item.return_number, item)}
+                              className="font-mono font-bold text-slate-900 dark:text-white hover:text-blue-700 dark:hover:text-blue-300 hover:underline cursor-pointer inline-flex items-center text-left"
+                              title="Click to view Return Voucher / Slip"
+                            >
+                              {item.return_number}
+                            </button>
+                          ) : (
+                            <span className="text-gray-400 font-mono">—</span>
+                          )}
+                        </td>
+
+                        {/* 6. Original Inv # */}
+                        <td className="py-3 px-4 font-mono text-xs whitespace-nowrap">
+                          {item.bill_number && item.bill_number !== '-' ? (
+                            <button
+                              type="button"
+                              onClick={() => handleOpenInvoicePreview(item.bill_number)}
+                              className="font-mono font-bold text-slate-900 dark:text-white hover:text-blue-700 dark:hover:text-blue-300 hover:underline cursor-pointer inline-flex items-center text-left"
+                              title="Click to view Original Tax Invoice"
+                            >
+                              {item.bill_number}
+                            </button>
+                          ) : (
+                            <span className="text-gray-400 font-mono">—</span>
+                          )}
+                        </td>
+
+                        {/* 7. Customer */}
+                        <td className="py-3 px-4 whitespace-nowrap">
+                          <span className="font-semibold text-gray-800 dark:text-slate-200 text-xs">
+                            {item.customer_name || 'In-House'}
+                          </span>
+                        </td>
+
+                        {/* 8. QC Findings / Notes */}
+                        <td className="py-3 px-4 min-w-[220px] max-w-sm">
+                          {item.qc_notes && item.qc_notes.trim() ? (
+                            <span className="text-gray-800 dark:text-slate-200 font-medium text-xs block break-words whitespace-normal" title={item.qc_notes}>
+                              {item.qc_notes}
+                            </span>
+                          ) : (
+                            <span className="text-gray-400 text-xs font-mono">—</span>
+                          )}
+                        </td>
+
+                        {/* 9. Return Reason */}
+                        <td className="py-3 px-4 text-center whitespace-nowrap">
+                          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider bg-rose-50 dark:bg-rose-950/60 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-900">
+                            {item.reason || 'Defective Product'}
+                          </span>
+                        </td>
+                      </tr>
+                    )
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
+
+          {/* Pagination */}
+          <ListPagePagination
+            currentPage={currentPage}
+            totalPages={totalPages}
+            totalItems={totalItems}
+            itemsPerPage={itemsPerPage}
+            onPageChange={setCurrentPage}
+            onItemsPerPageChange={(newSize) => {
+              setItemsPerPage(newSize)
+              setCurrentPage(1)
+            }}
+          />
+        </div>
+      )}
+
+      {/* 5. Quick Edit Stock & Threshold Modal */}
+      {editModalOpen && editingItem && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs font-['Poppins',sans-serif]">
+          <div className="bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-none shadow-2xl w-full max-w-md overflow-hidden animate-in fade-in duration-150">
+            <div className="px-5 py-4 border-b border-gray-200 dark:border-slate-800 bg-[#f8fafc] dark:bg-slate-800/80 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Edit3 size={16} className="text-[#FF8533] dark:text-blue-400" />
+                <h3 className="text-xs font-bold uppercase tracking-wider text-[#292424] dark:text-white">
+                  Quick Edit Stock &amp; Threshold
+                </h3>
+              </div>
+              <button
+                onClick={() => setEditModalOpen(false)}
+                className="text-gray-400 hover:text-gray-600 dark:hover:text-slate-200 cursor-pointer"
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveEdit} className="p-5 space-y-4">
+              <div className="p-3 bg-blue-50/50 dark:bg-blue-950/30 border border-blue-100 dark:border-blue-900/60 rounded-none">
+                <span className="text-xs font-bold text-gray-800 dark:text-white block">
+                  {editingItem.name}
+                </span>
+                <span className="text-[11px] text-gray-500 dark:text-slate-400">
+                  Category: {editingItem.category_name || 'Uncategorized'}{editingItem.brand ? ` | Brand: ${editingItem.brand}` : ''} | Unit: {editingItem.unit || 'Nos'}
+                </span>
+              </div>
+
+              {/* Current Available Stock (Read-Only Showcase) */}
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block text-xs font-semibold text-gray-700 dark:text-slate-200">
+                    Current Available Stock ({editingItem.unit || 'Units'})
+                  </label>
+                  <span className="text-[10px] font-medium text-emerald-700 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/60 px-2 py-0.5 border border-emerald-200 dark:border-emerald-800 rounded-none">
+                    Warehouse Balance
+                  </span>
+                </div>
+                <div className="w-full px-3.5 py-2.5 bg-gray-50 dark:bg-slate-800/70 border border-gray-200 dark:border-slate-700 flex items-center justify-between">
+                  <span className="text-sm font-mono font-bold text-slate-900 dark:text-white">
+                    {editingItem.current_stock !== undefined ? editingItem.current_stock : (editingItem.opening_stock || 0)}
+                  </span>
+                  <span className="text-xs font-semibold text-gray-500 dark:text-slate-400">
+                    {editingItem.unit || 'Nos'}
+                  </span>
+                </div>
+                <p className="text-[10px] text-gray-400 dark:text-slate-500 mt-1">
+                  Current warehouse stock is auto-tracked via Inward purchases &amp; Outward bills.
+                </p>
+              </div>
+
+              {/* Reorder Threshold Input */}
+              <div>
+                <label className="block text-xs font-semibold text-gray-700 dark:text-slate-200 mb-1">
+                  Low Stock Reorder Alert Threshold ({editingItem.unit || 'Units'}) <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="number"
+                  min="0"
+                  required
+                  value={editThresholdVal}
+                  onChange={(e) => setEditThresholdVal(e.target.value)}
+                  className="w-full px-3.5 py-2 text-sm font-mono font-bold text-gray-900 dark:text-white bg-white dark:bg-slate-950 border border-gray-300 dark:border-slate-700 rounded-none focus:outline-none focus:border-[#FF8533] dark:focus:border-blue-500"
+                />
+                <p className="text-[10px] text-gray-400 dark:text-slate-500 mt-1">
+                  When stock falls below or equals this quantity, low stock warning is triggered.
+                </p>
+              </div>
+
+              <div className="pt-3 border-t border-gray-200 dark:border-slate-800 flex items-center justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setEditModalOpen(false)}
+                  className="px-4 py-2 text-xs font-semibold text-gray-700 dark:text-slate-300 bg-white dark:bg-slate-900 border border-gray-300 dark:border-slate-700 rounded-none cursor-pointer hover:bg-gray-50 dark:hover:bg-slate-800"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSavingEdit}
+                  className="px-5 py-2 text-xs font-bold text-white bg-[#FF8533] hover:bg-[#FF8533] dark:bg-blue-600 dark:hover:bg-blue-500 border border-[#FF8533] dark:border-blue-600 rounded-none flex items-center gap-1.5 cursor-pointer shadow-xs"
+                >
+                  {isSavingEdit ? <Loader2 size={13} className="animate-spin" /> : <CheckCircle2 size={13} />}
+                  <span>Save Changes</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* 6. Registered Serial Numbers Vault Modal (Option 1 - FileDigit Icon) */}
+      {serialsModalOpen && selectedMaterialForSerials && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs font-['Poppins',sans-serif]">
+          <div className="bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-none shadow-2xl w-full max-w-2xl overflow-hidden animate-in fade-in duration-150 flex flex-col max-h-[90vh]">
+            
+            {/* Modal Header */}
+            <div className="px-6 py-4 border-b border-gray-200 dark:border-slate-800 bg-[#f8fafc] dark:bg-slate-800/80 flex items-center justify-between shrink-0">
+              <div className="flex items-center gap-3">
+                <div className="w-9 h-9 rounded-none bg-blue-100 dark:bg-blue-950/80 border border-blue-200 dark:border-blue-800 flex items-center justify-center text-blue-700 dark:text-blue-400">
+                  <FileDigit size={20} />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-[#292424] dark:text-white uppercase tracking-wider flex items-center gap-2">
+                    <span>Serial Numbers Vault</span>
+                    <span className="text-[10px] font-mono px-2 py-0.5 bg-blue-50 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800">
+                      {selectedMaterialForSerials.hsn_code ? `HSN: ${selectedMaterialForSerials.hsn_code}` : 'Live Inventory'}
+                    </span>
+                  </h3>
+                  <p className="text-xs text-gray-500 dark:text-slate-400 font-medium truncate max-w-md">
+                    {selectedMaterialForSerials.name}
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setSerialsModalOpen(false)}
+                className="text-gray-400 hover:text-gray-600 dark:hover:text-slate-200 p-1.5 transition-colors cursor-pointer"
+                title="Close Modal"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            {/* KPI Mini-Bar */}
+            <div className="grid grid-cols-3 divide-x divide-gray-200 dark:divide-slate-800 border-b border-gray-200 dark:border-slate-800 bg-gray-50/50 dark:bg-slate-900/50 shrink-0">
+              <div className="px-4 py-2.5 text-center">
+                <span className="text-[10px] uppercase font-bold text-gray-500 dark:text-slate-400 block tracking-wider">
+                  Total Serials
+                </span>
+                <span className="text-base font-black font-mono text-[#292424] dark:text-white">
+                  {serialsSummary.total_count}
+                </span>
+              </div>
+              <div className="px-4 py-2.5 text-center bg-emerald-50/30 dark:bg-emerald-950/20">
+                <span className="text-[10px] uppercase font-bold text-emerald-700 dark:text-emerald-400 block tracking-wider">
+                  In Warehouse (Available)
+                </span>
+                <span className="text-base font-black font-mono text-emerald-600 dark:text-emerald-400">
+                  {serialsSummary.available_count}
+                </span>
+              </div>
+              <div className="px-4 py-2.5 text-center bg-slate-50/50 dark:bg-slate-800/40">
+                <span className="text-[10px] uppercase font-bold text-gray-600 dark:text-slate-400 block tracking-wider">
+                  Sold / Outward
+                </span>
+                <span className="text-base font-black font-mono text-gray-700 dark:text-slate-300">
+                  {serialsSummary.sold_count}
+                </span>
+              </div>
+            </div>
+
+            {/* Search & Actions Bar */}
+            <div className="p-4 border-b border-gray-200 dark:border-slate-800 bg-white dark:bg-slate-900 flex flex-col sm:flex-row items-center justify-between gap-3 shrink-0">
+              {/* Search Box */}
+              <div className="relative w-full sm:w-64">
+                <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                <input
+                  type="text"
+                  value={serialsSearch}
+                  onChange={(e) => setSerialsSearch(e.target.value)}
+                  placeholder="Search serial number..."
+                  className="w-full pl-8 pr-3 py-1.5 text-xs font-mono text-gray-800 dark:text-white bg-gray-50 dark:bg-slate-950 border border-gray-300 dark:border-slate-700 rounded-none focus:outline-none focus:border-[#FF8533] dark:focus:border-blue-500"
+                />
+              </div>
+
+              {/* Filter Tabs & Copy All */}
+              <div className="flex items-center gap-2 w-full sm:w-auto justify-between sm:justify-end">
+                <div className="inline-flex border border-gray-200 dark:border-slate-700 rounded-none overflow-hidden p-0.5 bg-gray-100 dark:bg-slate-800">
+                  <button
+                    onClick={() => setSerialsFilterStatus('ALL')}
+                    className={`px-2.5 py-1 text-[11px] font-bold transition-all cursor-pointer ${
+                      serialsFilterStatus === 'ALL'
+                        ? 'bg-white dark:bg-slate-900 text-[#FF8533] dark:text-blue-400 shadow-2xs'
+                        : 'text-gray-500 dark:text-slate-400 hover:text-gray-800'
+                    }`}
+                  >
+                    All ({serialsSummary.total_count})
+                  </button>
+                  <button
+                    onClick={() => setSerialsFilterStatus('Available')}
+                    className={`px-2.5 py-1 text-[11px] font-bold transition-all cursor-pointer ${
+                      serialsFilterStatus === 'Available'
+                        ? 'bg-emerald-600 text-white shadow-2xs'
+                        : 'text-emerald-700 dark:text-emerald-400 hover:text-emerald-800'
+                    }`}
+                  >
+                    Available ({serialsSummary.available_count})
+                  </button>
+                  <button
+                    onClick={() => setSerialsFilterStatus('Sold')}
+                    className={`px-2.5 py-1 text-[11px] font-bold transition-all cursor-pointer ${
+                      serialsFilterStatus === 'Sold'
+                        ? 'bg-slate-700 text-white shadow-2xs'
+                        : 'text-gray-600 dark:text-slate-400 hover:text-gray-800'
+                    }`}
+                  >
+                    Sold ({serialsSummary.sold_count})
+                  </button>
+                </div>
+
+                <button
+                  onClick={handleCopyAllAvailable}
+                  disabled={serialsSummary.available_count === 0}
+                  className="px-3 py-1.5 text-xs font-semibold text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/60 hover:bg-emerald-600 hover:text-white border border-emerald-300 dark:border-emerald-800 rounded-none flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed shrink-0"
+                  title="Copy all available serial numbers to clipboard"
+                >
+                  <Copy size={12} />
+                  <span>Copy Available</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Modal Body / Serials List */}
+            <div className="p-5 overflow-y-auto flex-1 max-h-[380px] bg-gray-50/40 dark:bg-slate-950/50">
+              {serialsLoading ? (
+                <div className="py-16 flex flex-col items-center justify-center gap-2 text-gray-400 dark:text-slate-500">
+                  <Loader2 size={24} className="animate-spin text-[#FF8533] dark:text-blue-400" />
+                  <span className="text-xs font-semibold">Loading Registered Serials...</span>
+                </div>
+              ) : filteredModalSerials.length === 0 ? (
+                <div className="py-12 text-center text-gray-400 dark:text-slate-500">
+                  <FileDigit size={32} className="mx-auto mb-2 text-gray-300 dark:text-slate-600" />
+                  <p className="text-xs font-semibold text-gray-600 dark:text-slate-400">
+                    {serialsList.length === 0
+                      ? 'No serial numbers registered yet for this material.'
+                      : 'No serial numbers match your search filter.'}
+                  </p>
+                  <p className="text-[11px] text-gray-400 dark:text-slate-500 mt-1 max-w-sm mx-auto">
+                    Serial numbers entered during Inward Purchases are automatically recorded here for outward billing verification.
+                  </p>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                  {filteredModalSerials.map((sn) => {
+                    const isAvailable = sn.status === 'Available'
+                    const isCopied = copiedSerial === sn.serial_number
+
+                    return (
+                      <div
+                        key={sn.id}
+                        className={`p-3 border rounded-none flex items-center justify-between transition-all ${
+                          isAvailable
+                            ? 'bg-white dark:bg-slate-900 border-emerald-200/80 dark:border-emerald-900/60 hover:border-emerald-400 shadow-2xs'
+                            : 'bg-gray-50 dark:bg-slate-900/60 border-gray-200 dark:border-slate-800 opacity-80'
+                        }`}
+                      >
+                        <div className="flex items-center gap-2.5 min-w-0">
+                          <div className={`p-1.5 rounded-none ${
+                            isAvailable
+                              ? 'bg-emerald-50 dark:bg-emerald-950 text-emerald-600 dark:text-emerald-400'
+                              : 'bg-gray-100 dark:bg-slate-800 text-gray-400'
+                          }`}>
+                            <Hash size={13} />
+                          </div>
+                          <div className="min-w-0">
+                            <span className="font-mono text-xs font-bold text-gray-900 dark:text-white block truncate">
+                              {sn.serial_number}
+                            </span>
+                            <div className="flex items-center gap-1.5 mt-0.5">
+                              <span className={`inline-flex items-center gap-1 text-[9px] font-bold uppercase px-1.5 py-0.2 border ${
+                                isAvailable
+                                  ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300 border-emerald-200 dark:border-emerald-900'
+                                  : 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300 border-slate-200 dark:border-slate-700'
+                              }`}>
+                                <span className={`w-1.5 h-1.5 rounded-full ${isAvailable ? 'bg-emerald-500 animate-pulse' : 'bg-slate-400'}`} />
+                                {sn.status}
+                              </span>
+                              {sn.created_at && (
+                                <span className="text-[10px] text-gray-400 font-mono">
+                                  {new Date(sn.created_at).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+
+                        <button
+                          onClick={() => handleCopySingleSerial(sn.serial_number)}
+                          className={`p-1.5 rounded-none border transition-colors cursor-pointer shrink-0 ml-2 ${
+                            isCopied
+                              ? 'bg-emerald-600 text-white border-emerald-600'
+                              : 'bg-gray-50 dark:bg-slate-800 text-gray-500 dark:text-slate-400 hover:text-[#FF8533] dark:hover:text-blue-400 border-gray-200 dark:border-slate-700'
+                          }`}
+                          title="Copy Serial Number"
+                        >
+                          {isCopied ? <Check size={13} /> : <Copy size={13} />}
+                        </button>
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+            </div>
+
+            {/* Modal Footer */}
+            <div className="px-6 py-3.5 border-t border-gray-200 dark:border-slate-800 bg-[#f8fafc] dark:bg-slate-800/80 flex items-center justify-between shrink-0">
+              <span className="text-xs text-gray-500 dark:text-slate-400 font-medium">
+                Showing <strong className="font-mono text-gray-800 dark:text-white">{filteredModalSerials.length}</strong> of <strong className="font-mono text-gray-800 dark:text-white">{serialsList.length}</strong> serials
+              </span>
+              <button
+                type="button"
+                onClick={() => setSerialsModalOpen(false)}
+                className="px-5 py-2 text-xs font-bold text-white bg-[#FF8533] hover:bg-[#FF8533] dark:bg-blue-600 dark:hover:bg-blue-500 border border-[#FF8533] dark:border-blue-600 rounded-none transition-colors cursor-pointer shadow-xs"
+              >
+                Close Vault
+              </button>
+            </div>
+
+          </div>
+        </div>
+      )}
+
+      {/* 6. Return Voucher Slip Modal */}
+      {viewModalOpen && selectedReturnView && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 animate-in fade-in duration-150">
+          <div className="bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 w-full max-w-lg shadow-2xl p-6 relative">
+            <div className="flex items-center justify-between pb-3 border-b border-gray-200 dark:border-slate-800">
+              <div className="flex items-center gap-2">
+                <FileText size={18} className="text-[#FF8533] dark:text-blue-400" />
+                <h3 className="font-bold text-sm text-gray-900 dark:text-white">
+                  {selectedReturnView.qc_decision === 'REFUND' || selectedReturnView.qc_decision === 'Credit Note' || (selectedReturnView.resolution_ref && selectedReturnView.resolution_ref.includes('CN'))
+                    ? 'Credit Note Slip'
+                    : 'Return Voucher Slip'}
+                </h3>
+              </div>
+              <button
+                onClick={() => setViewModalOpen(false)}
+                className="text-gray-400 hover:text-gray-600 dark:hover:text-slate-200 p-1 cursor-pointer"
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            <div className="py-4 space-y-2.5 text-xs">
+              <div className="flex justify-between py-1 border-b border-gray-100 dark:border-slate-800">
+                <span className="text-gray-500">Return ID:</span>
+                <span className="font-mono font-bold text-slate-900 dark:text-white">{selectedReturnView.return_number}</span>
+              </div>
+              <div className="flex justify-between py-1 border-b border-gray-100 dark:border-slate-800">
+                <span className="text-gray-500">Return Date:</span>
+                <span className="font-semibold text-gray-800 dark:text-slate-200">
+                  {selectedReturnView.return_date || selectedReturnView.date
+                    ? new Date(selectedReturnView.return_date || selectedReturnView.date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })
+                    : '-'}
+                </span>
+              </div>
+              <div className="flex justify-between py-1 border-b border-gray-100 dark:border-slate-800">
+                <span className="text-gray-500">Customer:</span>
+                <span className="font-semibold text-gray-800 dark:text-slate-200">
+                  {selectedReturnView.customer_name} {selectedReturnView.customer_phone ? `(${selectedReturnView.customer_phone})` : ''}
+                </span>
+              </div>
+              <div className="flex justify-between py-1 border-b border-gray-100 dark:border-slate-800">
+                <span className="text-gray-500">Original Invoice #:</span>
+                <span className="font-mono font-semibold text-gray-800 dark:text-slate-200">{selectedReturnView.bill_number}</span>
+              </div>
+              <div className="flex justify-between py-1 border-b border-gray-100 dark:border-slate-800">
+                <span className="text-gray-500">Product:</span>
+                <span className="font-semibold text-gray-800 dark:text-slate-200">
+                  {selectedReturnView.item_name || selectedReturnView.material_name}
+                </span>
+              </div>
+              {selectedReturnView.serial_number && (
+                <div className="flex justify-between py-1 border-b border-gray-100 dark:border-slate-800">
+                  <span className="text-gray-500">Serial #:</span>
+                  <span className="font-mono font-bold text-blue-600 dark:text-blue-400">{selectedReturnView.serial_number}</span>
+                </div>
+              )}
+              <div className="flex justify-between py-1 border-b border-gray-100 dark:border-slate-800">
+                <span className="text-gray-500">Reason:</span>
+                <span className="font-semibold text-rose-600 dark:text-rose-400">{selectedReturnView.reason}</span>
+              </div>
+              {selectedReturnView.qc_notes && (
+                <div className="pt-2">
+                  <span className="text-gray-400 block text-[11px] uppercase tracking-wider font-semibold">QC Findings Note:</span>
+                  <p className="mt-1 p-2 bg-slate-50 dark:bg-slate-800 text-gray-700 dark:text-slate-300 text-xs italic">
+                    "{selectedReturnView.qc_notes}"
+                  </p>
+                </div>
+              )}
+            </div>
+
+            <div className="pt-3 border-t border-gray-200 dark:border-slate-800 flex items-center justify-between">
+              <button
+                type="button"
+                onClick={() => window.print()}
+                className="px-3 py-1.5 text-xs font-semibold text-gray-700 dark:text-slate-200 bg-gray-100 dark:bg-slate-800 hover:bg-gray-200 dark:hover:bg-slate-700 rounded-none cursor-pointer flex items-center gap-1.5"
+              >
+                <Printer size={14} />
+                <span>Print Slip</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setViewModalOpen(false)}
+                className="px-4 py-1.5 text-xs font-bold text-white bg-[#FF8533] hover:bg-[#FF8533] rounded-none cursor-pointer"
+              >
+                Close Slip
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Direct Printable Return Voucher Portal for instant window.print() */}
+      {selectedReturnView && typeof document !== 'undefined' && createPortal(
+        <div id="return-slip-print-wrapper">
+          <ReturnVoucherTemplate returnItem={selectedReturnView} settings={settings} />
+        </div>,
+        document.body
+      )}
+
+      {/* 7. Original Invoice Bill Preview & Print Modal */}
+      {previewInvoiceBill && (
+        <InvoiceModal
+          isOpen={Boolean(previewInvoiceBill)}
+          onClose={() => setPreviewInvoiceBill(null)}
+          bill={previewInvoiceBill}
+          settings={settings}
+        />
+      )}
+
+    </div>
+  )
+}
+

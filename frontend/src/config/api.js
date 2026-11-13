@@ -1,0 +1,126 @@
+// Centralized API Configuration for separate frontend & backend hosting
+const rawBaseUrl = import.meta.env.VITE_API_BASE_URL || ''
+export const API_BASE_URL = rawBaseUrl.endsWith('/') ? rawBaseUrl.slice(0, -1) : rawBaseUrl
+
+// Automatically attach JWT token to all API requests if available
+if (typeof window !== 'undefined' && window.fetch && !window.__simcha_fetch_intercepted__) {
+  window.__simcha_fetch_intercepted__ = true
+  const nativeFetch = window.fetch
+  window.fetch = async function (resource, init = {}) {
+    const token = localStorage.getItem('simcha_token') || sessionStorage.getItem('simcha_token')
+    const resourceStr = typeof resource === 'string' ? resource : (resource?.url || '')
+    const isApiCall = resourceStr.includes('/api/') || resourceStr.startsWith('http') || resourceStr.startsWith('/')
+
+    if (token && isApiCall) {
+      if (init.headers instanceof Headers) {
+        if (!init.headers.has('Authorization')) {
+          init.headers.set('Authorization', `Bearer ${token}`)
+        }
+      } else {
+        const existingHeaders = init.headers || {}
+        const existingAuth = existingHeaders.Authorization || existingHeaders.authorization
+        if (!existingAuth) {
+          init.headers = {
+            ...existingHeaders,
+            Authorization: `Bearer ${token}`
+          }
+        }
+      }
+    }
+    return nativeFetch(resource, init)
+  }
+}
+
+export const getAuthHeaders = (extraHeaders = {}) => {
+  const token = typeof window !== 'undefined'
+    ? (localStorage.getItem('simcha_token') || sessionStorage.getItem('simcha_token'))
+    : null
+  return {
+    'Content-Type': 'application/json',
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    ...extraHeaders
+  }
+}
+
+export const API_ENDPOINTS = {
+  LOGIN: `${API_BASE_URL}/api/auth/login`,
+  ME: `${API_BASE_URL}/api/auth/me`,
+  PROFILE: `${API_BASE_URL}/api/auth/profile`,
+  CHANGE_PASSWORD: `${API_BASE_URL}/api/auth/change-password`,
+  CATEGORIES: `${API_BASE_URL}/api/categories`,
+  CATEGORY_BY_ID: (id) => `${API_BASE_URL}/api/categories/${id}`,
+  CATEGORY_STATUS: (id) => `${API_BASE_URL}/api/categories/${id}/status`,
+  MATERIALS: `${API_BASE_URL}/api/materials`,
+  MATERIAL_BY_ID: (id) => `${API_BASE_URL}/api/materials/${id}`,
+  MATERIAL_STATUS: (id) => `${API_BASE_URL}/api/materials/${id}/status`,
+  MATERIAL_BULK_DELETE: `${API_BASE_URL}/api/materials/bulk-delete`,
+  SETTINGS: `${API_BASE_URL}/api/settings`,
+  THEME_SETTINGS: `${API_BASE_URL}/api/settings/theme`,
+  EMAIL_CONFIG: `${API_BASE_URL}/api/email-config`,
+  EMAIL_TEST: `${API_BASE_URL}/api/email-config/test`,
+  EMAIL_TEMPLATES: `${API_BASE_URL}/api/email-config/templates`,
+  EMAIL_SEND_BILL: (billId) => `${API_BASE_URL}/api/email-config/send-bill/${billId}`,
+  BILLS: `${API_BASE_URL}/api/bills`,
+  BILL_BY_ID: (id) => `${API_BASE_URL}/api/bills/${id}`,
+  BILL_PAYMENT_UPDATE: (id) => `${API_BASE_URL}/api/bills/${id}/payment`,
+  BILL_ALLOCATE_SERIALS: (id) => `${API_BASE_URL}/api/bills/${id}/allocate-serials`,
+  BILL_SEND_RECEIPT: (id) => `${API_BASE_URL}/api/bills/${id}/send-receipt`,
+  NEXT_INVOICE_NUMBER: `${API_BASE_URL}/api/bills/meta/next-number`,
+  NEXT_RECEIPT_NUMBER: `${API_BASE_URL}/api/bills/meta/next-receipt-number`,
+
+  QUOTATIONS: `${API_BASE_URL}/api/quotations`,
+  QUOTATION_BY_ID: (id) => `${API_BASE_URL}/api/quotations/${id}`,
+  QUOTATION_STATUS: (id) => `${API_BASE_URL}/api/quotations/${id}/status`,
+  QUOTATION_SEND_EMAIL: (id) => `${API_BASE_URL}/api/quotations/${id}/send-email`,
+  QUOTATION_CONVERT: (id) => `${API_BASE_URL}/api/quotations/${id}/convert-to-invoice`,
+  NEXT_QUOTATION_NUMBER: `${API_BASE_URL}/api/quotations/meta/next-number`,
+
+  INWARDS: `${API_BASE_URL}/api/inwards`,
+  INWARD_BY_ID: (id) => `${API_BASE_URL}/api/inwards/${id}`,
+  NEXT_INWARD_NUMBER: `${API_BASE_URL}/api/inwards/meta/next-number`,
+  CLOUDINARY_CONFIG: `${API_BASE_URL}/api/cloudinary/config`,
+  CLOUDINARY_TEST: `${API_BASE_URL}/api/cloudinary/test`,
+  CLOUDINARY_UPLOAD: `${API_BASE_URL}/api/cloudinary/upload`,
+  VERIFY_SERIAL: (serial) => `${API_BASE_URL}/api/materials/verify-serial/${encodeURIComponent(serial)}`,
+  INVENTORY: `${API_BASE_URL}/api/inventory`,
+  INVENTORY_SCRAP: `${API_BASE_URL}/api/inventory/scrap`,
+  INVENTORY_LEDGER: `${API_BASE_URL}/api/inventory/ledger`,
+  INVENTORY_ADJUST: `${API_BASE_URL}/api/inventory/adjust`,
+  INVENTORY_REORDER_LEVEL: `${API_BASE_URL}/api/inventory/reorder-level`,
+  INVENTORY_UPDATE_STOCK_THRESHOLD: `${API_BASE_URL}/api/inventory/update-stock-threshold`,
+  INVENTORY_MATERIAL_SERIALS: (id, status) => `${API_BASE_URL}/api/inventory/serials/${id}${status ? `?status=${status}` : ''}`,
+  SERVICES: `${API_BASE_URL}/api/services`,
+  NEXT_SERVICE_NUMBER: `${API_BASE_URL}/api/services/next-number`,
+  SERVICE_BY_ID: (id) => `${API_BASE_URL}/api/services/${id}`,
+  SERVICE_STATUS_UPDATE: (id) => `${API_BASE_URL}/api/services/${id}/status`,
+  SERVICE_SEND_RECEIPT: (id) => `${API_BASE_URL}/api/services/${id}/send-receipt`,
+  SERVICE_SEND_QUOTATION: (id) => `${API_BASE_URL}/api/services/${id}/send-quotation`,
+  SERVICE_SEND_INVOICE: (id) => `${API_BASE_URL}/api/services/${id}/send-invoice`,
+  RETURNS: `${API_BASE_URL}/api/returns`,
+  RETURN_BY_ID: (id) => `${API_BASE_URL}/api/returns/${id}`,
+  NEXT_RETURN_NUMBER: `${API_BASE_URL}/api/returns/meta/next-number`,
+  RETURN_QC_DECISION: (id) => `${API_BASE_URL}/api/returns/${id}/qc`,
+  AI_CONFIG: `${API_BASE_URL}/api/ai/config`,
+  AI_TEST: `${API_BASE_URL}/api/ai/test`,
+  AI_CHAT: `${API_BASE_URL}/api/ai/chat`,
+  ROLES: `${API_BASE_URL}/api/roles`,
+  ROLE_BY_ID: (id) => `${API_BASE_URL}/api/roles/${id}`,
+  ROLE_STATUS: (id) => `${API_BASE_URL}/api/roles/${id}/status`,
+
+  USERS: `${API_BASE_URL}/api/users`,
+  USER_BY_ID: (id) => `${API_BASE_URL}/api/users/${id}`,
+  USER_STATUS: (id) => `${API_BASE_URL}/api/users/${id}/status`,
+  USER_RESEND_INVITE: (userId) => `${API_BASE_URL}/api/users/${userId}/resend-invite`,
+
+  DEPARTMENTS: `${API_BASE_URL}/api/departments`,
+  DEPARTMENT_BY_ID: (id) => `${API_BASE_URL}/api/departments/${id}`,
+  DEPARTMENT_STATUS: (id) => `${API_BASE_URL}/api/departments/${id}/status`,
+
+  AUTH_FORGOT_PASSWORD_SEND_OTP: `${API_BASE_URL}/api/auth/forgot-password/send-otp`,
+  AUTH_FORGOT_PASSWORD_VERIFY_OTP: `${API_BASE_URL}/api/auth/forgot-password/verify-otp`,
+  AUTH_VERIFY_RESET_TOKEN: (query) => `${API_BASE_URL}/api/auth/verify-reset-token${query ? `?${query}` : ''}`,
+  AUTH_RESET_PASSWORD: `${API_BASE_URL}/api/auth/reset-password`,
+
+  HEALTH: `${API_BASE_URL}/api/health`
+}
+
